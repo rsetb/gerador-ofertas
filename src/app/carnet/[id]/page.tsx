@@ -15,6 +15,7 @@ import PixQRCode from '@/components/PixQRCode';
 import { cn } from '@/lib/utils';
 import { getClientFirebase } from '@/lib/firebase-client';
 import { doc, getDoc } from 'firebase/firestore';
+import { useData } from '@/context/DataContext';
 
 
 const formatCurrency = (value: number) => {
@@ -26,13 +27,13 @@ const initialSettings: StoreSettings = {
     storeName: 'ADC Móveis', storeCity: '', storeAddress: '', pixKey: '', storePhone: ''
 };
 
-const CarnetContent = ({ order, settings, pixPayload }: { order: Order; settings: StoreSettings, pixPayload: string | null }) => {
+const CarnetContent = ({ order, settings, pixPayload, productCodeById }: { order: Order; settings: StoreSettings, pixPayload: string | null, productCodeById: Map<string, string> }) => {
     
     const subtotal = useMemo(() => order.items.reduce((acc, item) => acc + (item.price * item.quantity), 0), [order.items]);
     const valorFinanciado = order.total;
 
     return (
-    <div className="carnet-content-wrapper bg-white break-inside-avoid-page print:p-0 text-sm print:text-[10px] flex flex-col">
+    <div className="carnet-content-wrapper bg-white break-inside-avoid-page print:p-0 text-sm print:text-[9px] print:leading-tight flex flex-col">
         <div className="pb-1 border-b">
             <div className="flex justify-between items-start">
                 <div className="flex items-center">
@@ -53,52 +54,62 @@ const CarnetContent = ({ order, settings, pixPayload }: { order: Order; settings
             </div>
         </div>
 
-        <div className="grid grid-cols-3 gap-x-2 py-1 border-b">
-            <div className="col-span-1 space-y-0.5">
+        <div className="carnet-customer-grid grid grid-cols-1 sm:grid-cols-[1fr_1fr_0.95fr] gap-x-2 gap-y-0 py-0 print:py-0 border-b">
+            <div className="sm:col-span-1 space-y-0.5">
                 <p className="text-[9px] text-muted-foreground">CLIENTE</p>
-                <p className="font-semibold">{order.customer.name}</p>
+                <p className="carnet-customer-value font-semibold">{order.customer.name}</p>
                  <p className="text-[9px] text-muted-foreground">ENDEREÇO</p>
-                <p className="font-semibold">{`${order.customer.address}, ${order.customer.number}`}</p>
+                <p className="carnet-customer-value font-semibold">{`${order.customer.address}, ${order.customer.number}`}</p>
             </div>
-             <div className="col-span-1 space-y-0.5">
+             <div className="sm:col-span-1 space-y-0.5">
                 <p className="text-[9px] text-muted-foreground">CPF</p>
-                <p className="font-semibold">{order.customer.cpf}</p>
-                <p className="text-[9px] text-muted-foreground mt-1">VENDEDOR(A)</p>
-                <p className="font-semibold">{order.sellerName}</p>
-                <p className="text-[9px] text-muted-foreground mt-1">DATA DA COMPRA</p>
-                <p className="font-semibold">{format(new Date(order.date), 'dd/MM/yyyy', { locale: ptBR })}</p>
+                <p className="carnet-customer-value font-semibold">
+                    {order.customer.cpf || ''}
+                    {order.customer.code ? ` | Cód: ${order.customer.code}` : ''}
+                </p>
+                <p className="text-[9px] text-muted-foreground mt-0 print:mt-0">VENDEDOR(A)</p>
+                <p className="carnet-customer-value font-semibold">{order.sellerName}</p>
+                <p className="text-[9px] text-muted-foreground mt-0 print:mt-0">DATA DA COMPRA</p>
+                <p className="carnet-customer-value font-semibold">{format(new Date(order.date), 'dd/MM/yyyy', { locale: ptBR })}</p>
             </div>
-             <div className="col-span-1 flex items-center justify-end">
+             <div className="sm:col-span-1 sm:row-span-2 flex items-start justify-end">
                 {pixPayload && (
-                    <div className="w-full max-w-[120px] flex-shrink-0">
-                        <PixQRCode payload={pixPayload} />
+                    <div className="w-full max-w-[180px] flex-shrink-0">
+                        <PixQRCode payload={pixPayload} size={768} className="p-1" />
                     </div>
                 )}
             </div>
-            <div className="col-span-3 pt-1">
+            <div className="sm:col-span-2 sm:col-start-1 pt-0 print:pt-0 -mt-2 print:-mt-3">
                 <p className="text-[9px] text-muted-foreground">PRODUTOS</p>
-                <p className="font-semibold">{order.items.map(item => item.name).join(', ')}</p>
+                <p className="carnet-products-value font-semibold text-base sm:text-lg print:text-[13px] print:leading-tight">
+                    {order.items
+                      .map((item, index) => {
+                        const code = productCodeById.get(item.id) || String(index + 1);
+                        return `${code} - ${item.name}`;
+                      })
+                      .join(', ')}
+                </p>
             </div>
         </div>
         
-        <div className="flex-grow mt-1 border rounded-md overflow-hidden flex flex-col">
+        <div className="flex-grow mt-0.5 print:mt-0 border rounded-md overflow-hidden flex flex-col">
             <div className="overflow-y-auto">
-                <table className="w-full text-xs print:text-[9px]">
+                <table className="carnet-installments-table w-full text-sm print:text-[11px]">
                     <thead className="bg-muted/50 print:bg-gray-100">
                         <tr className="border-b">
-                            <th className="p-1 text-center font-medium w-[15%]">Parc.</th>
-                            <th className="p-1 text-left font-medium w-[25%]">Venc.</th>
-                            <th className="p-1 text-right font-medium w-[25%]">Valor (R$)</th>
-                            <th className="p-1 text-left font-medium w-[35%]">Data Pag.</th>
+                            <th className="px-2 py-1 print:px-1 print:py-0.5 text-center font-semibold w-[15%]">Parc.</th>
+                            <th className="px-2 py-1 print:px-1 print:py-0.5 text-left font-semibold w-[25%]">Venc.</th>
+                            <th className="px-2 py-1 print:px-1 print:py-0.5 text-right font-semibold w-[25%]">Valor (R$)</th>
+                            <th className="px-2 py-1 print:px-1 print:py-0.5 text-left font-semibold w-[35%]">Data Pag.</th>
                         </tr>
                     </thead>
                     <tbody>
                         {(order.installmentDetails || []).map((installment) => (
                             <tr key={installment.installmentNumber} className="border-b last:border-none">
-                                <td className="p-1 text-center font-medium">{installment.installmentNumber}/{order.installments}</td>
-                                <td className="p-1">{format(parseISO(installment.dueDate), 'dd/MM/yy')}</td>
-                                <td className="p-1 text-right font-mono">{formatCurrency(installment.amount)}</td>
-                                <td className="p-1 border-l">
+                                <td className="px-2 py-1 print:px-1 print:py-0.5 text-center font-semibold">{installment.installmentNumber}/{order.installments}</td>
+                                <td className="px-2 py-1 print:px-1 print:py-0.5 font-semibold">{format(parseISO(installment.dueDate), 'dd/MM/yy')}</td>
+                                <td className="px-2 py-1 print:px-1 print:py-0.5 text-right font-mono font-semibold">{formatCurrency(installment.amount)}</td>
+                                <td className="px-2 py-1 print:px-1 print:py-0.5 border-l">
                                     {installment.status === 'Pago' 
                                         ? (installment.paymentDate ? format(parseISO(installment.paymentDate), 'dd/MM/yy') : 'Pago')
                                         : '___/__/____'
@@ -148,7 +159,7 @@ const CarnetContent = ({ order, settings, pixPayload }: { order: Order; settings
             </div>
         )}
         
-        <div className="mt-1 pt-1 text-[9px] text-muted-foreground border-t">
+        <div className="mt-0.5 print:mt-0 pt-0.5 print:pt-0 text-[9px] print:text-[8px] text-muted-foreground border-t">
             <p className="font-semibold">Importante:</p>
             <ol className="list-decimal list-inside">
                 <li>O pagamento pode ser realizado na loja ou via PIX (solicite o código ao vendedor).</li>
@@ -164,6 +175,7 @@ export default function CarnetPage() {
   const [order, setOrder] = useState<Order | null>(null);
   const [settings, setSettings] = useState<StoreSettings>(initialSettings);
   const [isLoading, setIsLoading] = useState(true);
+  const { products } = useData();
 
   useEffect(() => {
     const orderId = params.id as string;
@@ -196,6 +208,15 @@ export default function CarnetPage() {
       });
 
   }, [params.id]);
+
+  const productCodeById = useMemo(() => {
+    const map = new Map<string, string>();
+    products.forEach((p) => {
+      const code = (p.code || '').trim();
+      if (code) map.set(p.id, code);
+    });
+    return map;
+  }, [products]);
 
 
   const nextPendingInstallment = useMemo(() => {
@@ -284,10 +305,10 @@ export default function CarnetPage() {
         
         <main className="w-full bg-white p-4 print:p-0 print:shadow-none print-default:grid print-default:grid-cols-2 print-default:gap-x-4 print-a4:flex print-a4:flex-col">
             <div className="print-default:border-r print-default:border-dashed print-default:border-black print-default:pr-4">
-                <CarnetContent order={order} settings={settings} pixPayload={pixPayload} />
+                <CarnetContent order={order} settings={settings} pixPayload={pixPayload} productCodeById={productCodeById} />
             </div>
             <div className="hidden print-default:block print-default:pl-4">
-                <CarnetContent order={order} settings={settings} pixPayload={pixPayload} />
+                <CarnetContent order={order} settings={settings} pixPayload={pixPayload} productCodeById={productCodeById} />
             </div>
         </main>
       </div>

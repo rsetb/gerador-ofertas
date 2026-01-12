@@ -42,6 +42,7 @@ function isValidCPF(cpf: string) {
 }
 
 const checkoutSchema = z.object({
+  code: z.string().optional(),
   name: z.string().min(3, 'Nome completo é obrigatório.'),
   cpf: z.string().refine(isValidCPF, {
     message: 'CPF inválido.',
@@ -99,6 +100,7 @@ export default function CheckoutForm() {
   const form = useForm<z.infer<typeof checkoutSchema>>({
     resolver: zodResolver(checkoutSchema),
     defaultValues: {
+      code: '',
       name: '',
       cpf: '',
       phone: '',
@@ -133,6 +135,7 @@ export default function CheckoutForm() {
             form.reset({
                 ...existingCustomer,
                 cpf: existingCustomer.cpf, // ensure formatted cpf is kept if it was
+                code: existingCustomer.code || '',
             });
             setIsNewCustomer(false);
             toast({
@@ -141,6 +144,7 @@ export default function CheckoutForm() {
             });
         } else {
             setIsNewCustomer(true);
+            form.setValue('code', '');
             // Clear seller fields if customer is not found
             form.setValue('sellerId', undefined);
             form.setValue('sellerName', undefined);
@@ -270,7 +274,7 @@ export default function CheckoutForm() {
       
           toast({
               title: "Pedido Realizado com Sucesso!",
-              description: `Seu pedido #${savedOrder.id} foi confirmado.`,
+              description: `Seu pedido #${savedOrder.id} foi confirmado. Seu código é ${savedOrder.customer.code || '-'}.`,
           });
 
           if (settings.storePhone) {
@@ -300,6 +304,7 @@ export default function CheckoutForm() {
                   `${values.name}`,
                   `${values.phone}`,
                   `CPF: ${values.cpf}`,
+                  `Cód. Cliente: ${savedOrder.customer.code || '-'}`,
                   ``,
                   `*ENDEREÇO:*`,
                   `CEP: ${values.zip}`,
@@ -393,6 +398,19 @@ export default function CheckoutForm() {
                                 <FormMessage />
                             </FormItem> 
                         )} 
+                    />
+                    <FormField
+                        control={form.control}
+                        name="code"
+                        render={({ field }) => (
+                            <FormItem>
+                                <FormLabel>Código do Cliente</FormLabel>
+                                <FormControl>
+                                    <Input placeholder="Gerado automaticamente" {...field} disabled />
+                                </FormControl>
+                                <FormMessage />
+                            </FormItem>
+                        )}
                     />
                     <FormField control={form.control} name="name" render={({ field }) => ( <FormItem><FormLabel>Nome Completo</FormLabel><FormControl><Input {...field} /></FormControl><FormMessage /></FormItem> )} />
                     {sellerName && (

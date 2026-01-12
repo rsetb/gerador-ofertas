@@ -15,6 +15,7 @@ import { useToast } from '@/hooks/use-toast';
 import Logo from '@/components/Logo';
 import { getClientFirebase } from '@/lib/firebase-client';
 import { doc, getDoc } from 'firebase/firestore';
+import { useData } from '@/context/DataContext';
 
 const formatCurrency = (value: number) => {
   if (typeof value !== 'number' || isNaN(value)) return 'R$ 0,00';
@@ -26,6 +27,16 @@ const initialSettings: StoreSettings = {
 };
 
 const ReceiptContent = ({ order, installment, settings, via }: { order: Order; installment: Installment; settings: StoreSettings; via: 'Empresa' | 'Cliente' }) => {
+    const { products } = useData();
+
+    const productCodeById = useMemo(() => {
+        const map = new Map<string, string>();
+        products.forEach((p) => {
+            const code = (p.code || '').trim();
+            if (code) map.set(p.id, code);
+        });
+        return map;
+    }, [products]);
     
     const sortedPayments = useMemo(() => {
         if (!installment.payments || installment.payments.length === 0) return [];
@@ -61,18 +72,41 @@ const ReceiptContent = ({ order, installment, settings, via }: { order: Order; i
                 <div className="space-y-1">
                     <p>CLIENTE: {order.customer.name.toUpperCase()}</p>
                     <p>CPF: {order.customer.cpf}</p>
+                    {order.customer.code && <p>CÓD CLIENTE: {order.customer.code}</p>}
                     <p>TELEFONE: {order.customer.phone}</p>
                     <p>ENDEREÇO: {`${order.customer.address}, ${order.customer.number}${order.customer.complement ? `, ${order.customer.complement}` : ''}`}</p>
                     <p>PEDIDO: {order.id}</p>
                 </div>
                 <div className="space-y-1 text-right">
-                    <p>PARCELA: {installment.installmentNumber}/{order.installments}</p>
-                    <p>VENCIMENTO: {format(parseISO(installment.dueDate), 'dd/MM/yyyy')}</p>
-                    <p>VALOR ORIGINAL: {formatCurrency(valorOriginal)}</p>
+                    <p className="receipt-main-values text-base font-extrabold">PARCELA: {installment.installmentNumber}/{order.installments}</p>
+                    <p className="receipt-main-values text-base font-extrabold">VENCIMENTO: {format(parseISO(installment.dueDate), 'dd/MM/yyyy')}</p>
+                    <p className="receipt-main-values text-base font-semibold">VALOR ORIGINAL: {formatCurrency(valorOriginal)}</p>
                     {(order.downPayment || 0) > 0 && <p>ENTRADA: -{formatCurrency(order.downPayment || 0)}</p>}
                     {(order.discount || 0) > 0 && <p>DESCONTO: -{formatCurrency(order.discount || 0)}</p>}
-                    <p className="font-bold">VALOR FINANCIADO: {formatCurrency(valorFinanciado)}</p>
+                    <p className="receipt-main-values text-base font-extrabold">VALOR FINANCIADO: {formatCurrency(valorFinanciado)}</p>
                 </div>
+            </div>
+
+            <div className="py-3 receipt-products">
+                <h2 className="font-bold text-center mb-2">PRODUTOS DO PEDIDO</h2>
+                <table className="w-full receipt-products-table">
+                    <thead className="border-b border-black">
+                        <tr>
+                            <th className="text-left py-1 w-[10%]">Cód.</th>
+                            <th className="text-left py-1">Produto</th>
+                            <th className="text-center py-1 w-[12%]">Qtde</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {order.items.map((item, index) => (
+                            <tr key={item.id + index}>
+                                <td className="py-1">{productCodeById.get(item.id) || index + 1}</td>
+                                <td className="py-1">{item.name}</td>
+                                <td className="py-1 text-center">{item.quantity}</td>
+                            </tr>
+                        ))}
+                    </tbody>
+                </table>
             </div>
 
             <div className="py-4">

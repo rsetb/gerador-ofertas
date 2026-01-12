@@ -104,6 +104,33 @@ export default function OrderConfirmationPage() {
             Obrigado pela sua compra, {order.customer.name.split(' ')[0]}!
           </CardDescription>
           <p className="font-semibold text-muted-foreground">Número do Pedido: <Badge variant="secondary">{order.id}</Badge></p>
+          {order.customer.code && (
+            <p className="font-semibold text-muted-foreground">
+              Seu Código de Cliente: <Badge variant="secondary">{order.customer.code}</Badge>
+            </p>
+          )}
+          {settings.storePhone && (
+            <div className="mt-4 flex justify-center">
+              <a
+                href={`https://wa.me/55${settings.storePhone.replace(/\D/g, '')}?text=${encodeURIComponent(
+                  [
+                    '*Pedido do Catálogo Online*',
+                    `*Cód. Pedido:* ${order.id}`,
+                    order.customer.code ? `*Cód. Cliente:* ${order.customer.code}` : '*Cód. Cliente:* -',
+                    `*Cliente:* ${order.customer.name}`,
+                    order.customer.cpf ? `*CPF:* ${order.customer.cpf}` : '',
+                    `*Telefone:* ${order.customer.phone}`,
+                  ]
+                    .filter(Boolean)
+                    .join('\n')
+                )}`}
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                <Button variant="outline">Enviar no WhatsApp</Button>
+              </a>
+            </div>
+          )}
         </CardHeader>
         <CardContent className="p-6 md:p-8">
           <div className="grid md:grid-cols-2 gap-8">
@@ -157,6 +184,7 @@ export default function OrderConfirmationPage() {
             <h3 className="font-semibold text-lg mb-4">Informações de Entrega</h3>
             <div className="text-sm text-muted-foreground">
               <p className="font-semibold text-foreground">{order.customer.name}</p>
+              {order.customer.code && <p>Código do Cliente: {order.customer.code}</p>}
               <p>{`${order.customer.address}, ${order.customer.number}`}</p>
               <p>{`${order.customer.neighborhood}, ${order.customer.city}, ${order.customer.state} - ${order.customer.zip}`}</p>
               <p>Email: {order.customer.email}</p>

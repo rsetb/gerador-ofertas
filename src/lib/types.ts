@@ -56,6 +56,7 @@ export type Attachment = {
 };
 
 export type CustomerInfo = {
+  code?: string;
   name: string;
   cpf?: string;
   phone: string;

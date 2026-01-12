@@ -2,22 +2,22 @@
 
 import { useEffect, useState } from 'react';
 import QRCode from 'qrcode';
-import { Button } from './ui/button';
-import { useToast } from '@/hooks/use-toast';
-import { Copy, QrCode } from 'lucide-react';
+import { QrCode } from 'lucide-react';
 import { Skeleton } from './ui/skeleton';
+import { cn } from '@/lib/utils';
 
 interface PixQRCodeProps {
   payload: string;
+  size?: number;
+  className?: string;
 }
 
-export default function PixQRCode({ payload }: PixQRCodeProps) {
+export default function PixQRCode({ payload, size = 512, className }: PixQRCodeProps) {
   const [qrCodeUrl, setQrCodeUrl] = useState<string | null>(null);
-  const { toast } = useToast();
 
   useEffect(() => {
     if (payload) {
-      QRCode.toDataURL(payload, { width: 256, margin: 1 })
+      QRCode.toDataURL(payload, { width: size, margin: 1 })
         .then(url => {
           setQrCodeUrl(url);
         })
@@ -25,22 +25,13 @@ export default function PixQRCode({ payload }: PixQRCodeProps) {
           console.error('Failed to generate QR Code', err);
         });
     }
-  }, [payload]);
-
-  const handleCopy = () => {
-    navigator.clipboard.writeText(payload).then(() => {
-      toast({
-        title: 'Copiado!',
-        description: 'O código PIX foi copiado para a área de transferência.',
-      });
-    });
-  };
+  }, [payload, size]);
 
   if (!payload) return null;
 
   return (
-    <div className="flex flex-col items-center gap-2 p-2 border rounded-lg bg-muted/50">
-        <div className="flex items-center gap-2 font-semibold text-sm">
+    <div className={cn("flex flex-col items-center gap-2 print:gap-1 p-2 print:p-1 border rounded-lg bg-muted/50", className)}>
+        <div className="flex items-center gap-2 print:gap-1 font-semibold text-sm print:text-[9px]">
             <QrCode className="h-4 w-4 text-primary"/>
             <span>Pague com PIX</span>
         </div>

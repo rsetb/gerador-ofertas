@@ -102,7 +102,7 @@ const resizeImage = (file: File, MAX_WIDTH = 1920, MAX_HEIGHT = 1080): Promise<s
 };
 
 export default function CustomersAdminPage() {
-  const { updateCustomer, recordInstallmentPayment, updateInstallmentDueDate, updateOrderDetails, reversePayment, importCustomers, addOrder, deleteCustomer, updateOrderStatus } = useAdmin();
+  const { updateCustomer, recordInstallmentPayment, updateInstallmentDueDate, updateOrderDetails, reversePayment, importCustomers, addOrder, deleteCustomer, updateOrderStatus, generateCustomerCodes } = useAdmin();
   const { customers, customerOrders, customerFinancials, deletedCustomers } = useAdminData();
   const { user, users } = useAuth();
   const { settings } = useSettings();
@@ -125,6 +125,7 @@ export default function CustomersAdminPage() {
   const [expandedHistory, setExpandedHistory] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState('active');
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [isGeneratingCustomerCodes, setIsGeneratingCustomerCodes] = useState(false);
 
   const [commentDialog, setCommentDialog] = useState<{
     open: boolean;
@@ -169,7 +170,8 @@ export default function CustomersAdminPage() {
     const lowercasedQuery = searchQuery.toLowerCase();
     return customers.filter(customer =>
         customer.name.toLowerCase().includes(lowercasedQuery) ||
-        (customer.cpf && customer.cpf.replace(/\D/g, '').includes(lowercasedQuery))
+        (customer.cpf && customer.cpf.replace(/\D/g, '').includes(lowercasedQuery)) ||
+        (customer.code && customer.code.toLowerCase().includes(lowercasedQuery))
     );
   }, [customers, searchQuery]);
 
@@ -180,7 +182,8 @@ export default function CustomersAdminPage() {
     const lowercasedQuery = searchQuery.toLowerCase();
     return deletedCustomers.filter(customer =>
         customer.name.toLowerCase().includes(lowercasedQuery) ||
-        (customer.cpf && customer.cpf.replace(/\D/g, '').includes(lowercasedQuery))
+        (customer.cpf && customer.cpf.replace(/\D/g, '').includes(lowercasedQuery)) ||
+        (customer.code && customer.code.toLowerCase().includes(lowercasedQuery))
     );
   }, [deletedCustomers, searchQuery]);
   
@@ -550,6 +553,38 @@ Não esqueça de enviar o comprovante!`;
                                 <UserPlus className="h-4 w-4 mr-2" />
                                 Cadastrar
                             </Button>
+                            <AlertDialog>
+                                <AlertDialogTrigger asChild>
+                                    <Button variant="outline" size="sm" disabled={isGeneratingCustomerCodes}>
+                                        <KeyRound className="h-4 w-4 mr-2" />
+                                        Gerar Códigos
+                                    </Button>
+                                </AlertDialogTrigger>
+                                <AlertDialogContent>
+                                    <AlertDialogHeader>
+                                        <AlertDialogTitle>Gerar códigos para todos os clientes?</AlertDialogTitle>
+                                        <AlertDialogDescription>
+                                            Isso vai preencher o código em todos os pedidos antigos. Pode levar alguns segundos.
+                                        </AlertDialogDescription>
+                                    </AlertDialogHeader>
+                                    <AlertDialogFooter>
+                                        <AlertDialogCancel>Cancelar</AlertDialogCancel>
+                                        <AlertDialogAction
+                                            onClick={async () => {
+                                                if (!user) return;
+                                                try {
+                                                    setIsGeneratingCustomerCodes(true);
+                                                    await generateCustomerCodes(logAction, user);
+                                                } finally {
+                                                    setIsGeneratingCustomerCodes(false);
+                                                }
+                                            }}
+                                        >
+                                            Gerar
+                                        </AlertDialogAction>
+                                    </AlertDialogFooter>
+                                </AlertDialogContent>
+                            </AlertDialog>
                             <Button variant="outline" size="sm" onClick={() => fileInputRef.current?.click()}>
                                 <Import className="h-4 w-4 mr-2" />
                                 Importar
@@ -600,7 +635,10 @@ Não esqueça de enviar o comprovante!`;
                                         </div>
                                         <div>
                                             <p className="font-semibold">{customer.name}</p>
-                                            <p className="text-xs text-muted-foreground">{customer.cpf}</p>
+                                            <p className="text-xs text-muted-foreground">
+                                                {customer.code ? `${customer.code} • ` : ''}
+                                                {customer.cpf}
+                                            </p>
                                         </div>
                                     </div>
                                     </Button>
@@ -625,7 +663,10 @@ Não esqueça de enviar o comprovante!`;
                                             </div>
                                             <div className="flex-grow overflow-hidden">
                                                 <p className="font-semibold truncate" title={customer.name}>{customer.name}</p>
-                                                <p className="text-xs text-muted-foreground">{customer.cpf}</p>
+                                                <p className="text-xs text-muted-foreground">
+                                                    {customer.code ? `${customer.code} • ` : ''}
+                                                    {customer.cpf}
+                                                </p>
                                             </div>
                                         </div>
                                         <Button variant="ghost" size="sm" onClick={() => handleRestoreCustomer(customer)}>
@@ -728,6 +769,10 @@ Não esqueça de enviar o comprovante!`;
                         <div className="flex items-center gap-2">
                             <strong className="text-muted-foreground font-mono text-xs">CPF</strong>
                             <span>{selectedCustomer.cpf || 'Não informado'}</span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                            <strong className="text-muted-foreground font-mono text-xs">CÓD</strong>
+                            <span>{selectedCustomer.code || '—'}</span>
                         </div>
                          {selectedCustomer.sellerName && (
                             <div className="flex items-center gap-2">

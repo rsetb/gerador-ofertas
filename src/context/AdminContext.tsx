@@ -13,6 +13,7 @@ import { useData } from './DataContext';
 import { addMonths, format, parseISO } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { useAuth } from './AuthContext';
+import { allocateNextCustomerCode, formatCustomerCode, reserveCustomerCodes } from '@/lib/customer-code';
 
 // Helper function to log actions, passed as an argument now
 type LogAction = (action: string, details: string, user: User | null) => void;
@@ -84,9 +85,21 @@ function recalculateInstallments(total: number, installmentsCount: number, order
     return newInstallmentDetails;
 }
 
+function sanitizeCustomerForFirestore(customer: CustomerInfo): Record<string, any> {
+    const obj: Record<string, any> = {};
+    Object.entries(customer).forEach(([key, value]) => {
+        if (value !== undefined) obj[key] = value;
+    });
+    if (obj.password === undefined || obj.password === '') {
+        delete obj.password;
+    }
+    return obj;
+}
+
 
 interface AdminContextType {
   addOrder: (order: Partial<Order> & { firstDueDate: Date }, logAction: LogAction, user: User | null) => Promise<Order | null>;
+  generateCustomerCodes: (logAction: LogAction, user: User | null) => Promise<{ newCustomers: number; updatedOrders: number }>;
   deleteOrder: (orderId: string, logAction: LogAction, user: User | null) => Promise<void>;
   permanentlyDeleteOrder: (orderId: string, logAction: LogAction, user: User | null) => Promise<void>;
   updateOrderStatus: (orderId: string, status: Order['status'], logAction: LogAction, user: User | null) => Promise<void>;
@@ -777,12 +790,10 @@ export const AdminProvider = ({ children }: { children: ReactNode }) => {
     const orderId = `${prefix}-${Date.now().toString().slice(-6)}`;
     
     let isNewCustomer = true;
-    if (order.customer?.cpf) {
-        const normalizedCpf = order.customer.cpf.replace(/\D/g, '');
-        const existingCustomerOrder = orders.find(o => o.customer.cpf?.replace(/\D/g, '') === normalizedCpf);
-        if (existingCustomerOrder) {
-            isNewCustomer = false;
-        }
+    const customerKey = order.customer?.cpf?.replace(/\D/g, '') || (order.customer ? `${order.customer.name}-${order.customer.phone}` : '');
+    if (customerKey) {
+        const existingCustomerOrder = orders.find(o => (o.customer.cpf?.replace(/\D/g, '') || `${o.customer.name}-${o.customer.phone}`) === customerKey);
+        if (existingCustomerOrder) isNewCustomer = false;
     }
 
     const orderToSave = {
@@ -792,6 +803,13 @@ export const AdminProvider = ({ children }: { children: ReactNode }) => {
         sellerName: order.sellerName || 'Não atribuído',
         commissionPaid: false,
     } as Order;
+
+    if (orderToSave.customer) {
+        const existingCode = orderToSave.customer.code
+          || orders.find(o => (o.customer.cpf?.replace(/\D/g, '') || `${o.customer.name}-${o.customer.phone}`) === customerKey)?.customer.code;
+        const code = existingCode || await allocateNextCustomerCode(db);
+        orderToSave.customer = { ...orderToSave.customer, code };
+    }
 
     if (isNewCustomer && order.customer?.cpf) {
         orderToSave.customer.password = order.customer.cpf.substring(0, 6);
@@ -815,7 +833,7 @@ export const AdminProvider = ({ children }: { children: ReactNode }) => {
         throw new Error(`Estoque insuficiente para um ou mais produtos.`);
       }
 
-      await setDoc(doc(db, 'orders', orderToSave.id), orderToSave);
+      await setDoc(doc(db, 'orders', orderToSave.id), { ...orderToSave, customer: sanitizeCustomerForFirestore(orderToSave.customer) });
       
       const creator = user ? `por ${user.name}`: 'pelo cliente';
       logAction('Criação de Pedido', `Novo pedido #${orderToSave.id} para ${orderToSave.customer.name} no valor de R$${orderToSave.total?.toFixed(2)} foi criado ${creator}.`, user);
@@ -830,6 +848,78 @@ export const AdminProvider = ({ children }: { children: ReactNode }) => {
         throw e;
     }
   };
+
+  const generateCustomerCodes = useCallback(async (logAction: LogAction, user: User | null) => {
+    const { db } = getClientFirebase();
+
+    const customerKeyForOrder = (o: Order) =>
+      o.customer.cpf?.replace(/\D/g, '') || `${o.customer.name}-${o.customer.phone}`;
+
+    const codeByCustomerKey = new Map<string, string>();
+    let maxExistingNumber = 0;
+
+    orders.forEach((o) => {
+      const key = customerKeyForOrder(o);
+      if (!key) return;
+      const existing = (o.customer.code || '').trim();
+      if (!existing) return;
+      if (!codeByCustomerKey.has(key)) codeByCustomerKey.set(key, existing);
+      const numeric = Number(existing.replace(/\D/g, ''));
+      if (Number.isFinite(numeric) && numeric > maxExistingNumber) maxExistingNumber = numeric;
+    });
+
+    const uniqueCustomerKeys = Array.from(
+      new Set(
+        orders
+          .map((o) => customerKeyForOrder(o))
+          .filter((k) => !!k)
+      )
+    );
+
+    const missingKeys = uniqueCustomerKeys
+      .filter((k) => !codeByCustomerKey.has(k))
+      .sort((a, b) => a.localeCompare(b));
+
+    if (missingKeys.length > 0) {
+      const { startNumber } = await reserveCustomerCodes(db, missingKeys.length, maxExistingNumber);
+      missingKeys.forEach((key, idx) => {
+        codeByCustomerKey.set(key, formatCustomerCode(startNumber + idx));
+      });
+    }
+
+    const updates: Array<{ orderId: string; code: string }> = [];
+    orders.forEach((o) => {
+      const key = customerKeyForOrder(o);
+      const code = key ? codeByCustomerKey.get(key) : undefined;
+      if (!code) return;
+      if ((o.customer.code || '').trim() === code) return;
+      updates.push({ orderId: o.id, code });
+    });
+
+    const chunkSize = 450;
+    let updatedOrders = 0;
+    for (let i = 0; i < updates.length; i += chunkSize) {
+      const chunk = updates.slice(i, i + chunkSize);
+      const batch = writeBatch(db);
+      chunk.forEach((u) => {
+        batch.update(doc(db, 'orders', u.orderId), { 'customer.code': u.code });
+      });
+      await batch.commit();
+      updatedOrders += chunk.length;
+    }
+
+    logAction(
+      'Geração de Código de Cliente',
+      `Foram gerados códigos para ${missingKeys.length} clientes e atualizados ${updatedOrders} pedidos.`,
+      user
+    );
+    toast({
+      title: 'Códigos Gerados!',
+      description: `Novos clientes: ${missingKeys.length}. Pedidos atualizados: ${updatedOrders}.`,
+    });
+
+    return { newCustomers: missingKeys.length, updatedOrders };
+  }, [orders, toast]);
 
   const updateOrderStatus = useCallback(async (orderId: string, newStatus: Order['status'], logAction: LogAction, user: User | null) => {
     const { db } = getClientFirebase();
@@ -1039,15 +1129,15 @@ export const AdminProvider = ({ children }: { children: ReactNode }) => {
         if (orderCustomerKey === oldCustomerKey) {
             const customerDataForOrder = { ...updatedCustomerData };
             
-            if (customerDataForOrder.password === undefined || customerDataForOrder.password === '') {
-                delete customerDataForOrder.password;
+            if (updatedCustomerData.code === undefined && order.customer.code) {
+                customerDataForOrder.code = order.customer.code;
             }
             // Preserve seller info from the existing order record if not present in the update
             if (updatedCustomerData.sellerId === undefined && order.customer.sellerId) {
                 customerDataForOrder.sellerId = order.customer.sellerId;
                 customerDataForOrder.sellerName = order.customer.sellerName;
             }
-            batch.update(doc(db, 'orders', order.id), { customer: customerDataForOrder });
+            batch.update(doc(db, 'orders', order.id), { customer: sanitizeCustomerForFirestore(customerDataForOrder) });
         }
     });
 
@@ -1468,7 +1558,7 @@ export const AdminProvider = ({ children }: { children: ReactNode }) => {
   }, [orders, toast]);
   
   const value = useMemo(() => ({
-    addOrder, deleteOrder, permanentlyDeleteOrder, updateOrderStatus, recordInstallmentPayment, reversePayment, updateInstallmentDueDate, updateInstallmentAmount, updateCustomer, deleteCustomer, importCustomers, updateOrderDetails,
+    addOrder, generateCustomerCodes, deleteOrder, permanentlyDeleteOrder, updateOrderStatus, recordInstallmentPayment, reversePayment, updateInstallmentDueDate, updateInstallmentAmount, updateCustomer, deleteCustomer, importCustomers, updateOrderDetails,
     addProduct, updateProduct, deleteProduct,
     addCategory, deleteCategory, updateCategoryName, addSubcategory, updateSubcategory, deleteSubcategory, moveCategory, reorderSubcategories, moveSubcategory,
     payCommissions, reverseCommissionPayment,
@@ -1488,7 +1578,7 @@ export const AdminProvider = ({ children }: { children: ReactNode }) => {
     financialSummary,
     commissionSummary,
   }), [
-    addOrder, deleteOrder, permanentlyDeleteOrder, updateOrderStatus, recordInstallmentPayment, reversePayment, updateInstallmentDueDate, updateInstallmentAmount, updateCustomer, deleteCustomer, importCustomers, updateOrderDetails,
+    addOrder, generateCustomerCodes, deleteOrder, permanentlyDeleteOrder, updateOrderStatus, recordInstallmentPayment, reversePayment, updateInstallmentDueDate, updateInstallmentAmount, updateCustomer, deleteCustomer, importCustomers, updateOrderDetails,
     addProduct, updateProduct, deleteProduct,
     addCategory, deleteCategory, updateCategoryName, addSubcategory, updateSubcategory, deleteSubcategory, moveCategory, reorderSubcategories, moveSubcategory,
     payCommissions, reverseCommissionPayment,
