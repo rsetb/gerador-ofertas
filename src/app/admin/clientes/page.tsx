@@ -741,7 +741,12 @@ Não esqueça de enviar o comprovante!`;
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-4 text-sm">
                         <div className="flex items-center gap-2">
                             <UserIcon className="h-4 w-4 text-muted-foreground" />
-                            <span>{selectedCustomer.name}</span>
+                            <span className="flex items-center gap-2 flex-wrap">
+                                <span>{selectedCustomer.name}</span>
+                                {!!selectedCustomer.code && (
+                                    <span className="text-muted-foreground font-mono text-xs">{selectedCustomer.code}</span>
+                                )}
+                            </span>
                         </div>
                         <div className="flex items-center gap-2">
                             <Mail className="h-4 w-4 text-muted-foreground" />
