@@ -99,6 +99,22 @@ const dueDateRanges = [
     { value: '26-31', label: '26 a 31' },
 ];
 
+const months = [
+  { value: 'all', label: 'Todos' },
+  { value: '01', label: 'Janeiro' },
+  { value: '02', label: 'Fevereiro' },
+  { value: '03', label: 'Março' },
+  { value: '04', label: 'Abril' },
+  { value: '05', label: 'Maio' },
+  { value: '06', label: 'Junho' },
+  { value: '07', label: 'Julho' },
+  { value: '08', label: 'Agosto' },
+  { value: '09', label: 'Setembro' },
+  { value: '10', label: 'Outubro' },
+  { value: '11', label: 'Novembro' },
+  { value: '12', label: 'Dezembro' },
+];
+
 export default function OrdersAdminPage() {
   const { updateOrderStatus, recordInstallmentPayment, updateOrderDetails, updateInstallmentDueDate, deleteOrder, permanentlyDeleteOrder, reversePayment, emptyTrash, updateInstallmentAmount } = useAdmin();
   const { orders } = useAdminData();
@@ -126,6 +142,8 @@ export default function OrdersAdminPage() {
     showOverdue: false,
     showOnTime: false,
     dueDateRange: 'all',
+    month: '',
+    year: '',
   });
   const [activeTab, setActiveTab] = useState('active');
   const [expandedHistory, setExpandedHistory] = useState<string | null>(null);
@@ -141,6 +159,24 @@ export default function OrdersAdminPage() {
   const sellers = useMemo(() => {
     return users.filter(u => u.role === 'vendedor' || u.role === 'admin' || u.role === 'gerente');
   }, [users]);
+
+  const availableYears = useMemo(() => {
+    const currentYear = format(new Date(), 'yyyy');
+    if (!orders) return [currentYear];
+    const years = new Set<string>();
+    years.add(currentYear);
+    if (filters.year !== 'all' && filters.year) {
+      years.add(filters.year);
+    }
+    orders.forEach((o) => {
+      try {
+        years.add(format(parseISO(o.date), 'yyyy'));
+      } catch {
+      }
+    });
+    const sorted = Array.from(years).sort((a, b) => Number(b) - Number(a));
+    return sorted.length > 0 ? sorted : [currentYear];
+  }, [orders, filters.year]);
   
   const filteredOrders = useMemo(() => {
     if (!orders) return [];
@@ -154,6 +190,20 @@ export default function OrdersAdminPage() {
         const statusMatch = filters.status === 'all' || o.status === filters.status;
         
         const sellerMatch = filters.seller === 'all' || o.sellerId === filters.seller;
+
+        const dateMatch = (() => {
+          if ((!filters.year || filters.year === 'all') && (!filters.month || filters.month === 'all')) {
+            return true;
+          }
+          try {
+            const date = parseISO(o.date);
+            const yearOk = !filters.year || filters.year === 'all' || format(date, 'yyyy') === filters.year;
+            const monthOk = !filters.month || filters.month === 'all' || format(date, 'MM') === filters.month;
+            return yearOk && monthOk;
+          } catch {
+            return true;
+          }
+        })();
 
         const isOverdue = (o.installmentDetails || []).some(inst => inst.status === 'Pendente' && new Date(inst.dueDate) < new Date());
         const hasPendingInstallments = (o.installmentDetails || []).some(inst => inst.status === 'Pendente');
@@ -174,7 +224,7 @@ export default function OrdersAdminPage() {
             return dayOfMonth >= start && dayOfMonth <= end;
         });
 
-        return searchMatch && statusMatch && sellerMatch && overdueMatch && onTimeMatch && dueDateMatch;
+        return searchMatch && statusMatch && sellerMatch && dateMatch && overdueMatch && onTimeMatch && dueDateMatch;
     });
   }, [orders, filters]);
 
@@ -197,7 +247,6 @@ export default function OrdersAdminPage() {
         deletedOrders: deleted.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()),
     };
   }, [filteredOrders]);
-
 
   const { paginatedActiveOrders, totalActivePages } = useMemo(() => {
     const total = Math.ceil(activeOrders.length / ORDERS_PER_PAGE);
@@ -238,7 +287,16 @@ export default function OrdersAdminPage() {
   };
 
   const clearFilters = () => {
-    setFilters({ search: '', status: 'all', seller: 'all', showOverdue: false, showOnTime: false, dueDateRange: 'all' });
+    setFilters({
+      search: '',
+      status: 'all',
+      seller: 'all',
+      showOverdue: false,
+      showOnTime: false,
+      dueDateRange: 'all',
+      month: '',
+      year: '',
+    });
   };
 
   useEffect(() => {
@@ -511,6 +569,31 @@ Não esqueça de enviar o comprovante!`;
                                       <SelectItem value="all">Todos os Vendedores</SelectItem>
                                       {sellers.map(s => (
                                           <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>
+                                      ))}
+                                  </SelectContent>
+                              </Select>
+                          </div>
+                          <div className="min-w-[170px]">
+                              <Select value={filters.month} onValueChange={(value) => handleFilterChange('month', value)}>
+                                  <SelectTrigger className="w-full sm:w-[170px]">
+                                      <SelectValue placeholder="Mês" />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                      {months.map(m => (
+                                          <SelectItem key={m.value} value={m.value}>{m.label}</SelectItem>
+                                      ))}
+                                  </SelectContent>
+                              </Select>
+                          </div>
+                          <div className="min-w-[120px]">
+                              <Select value={filters.year} onValueChange={(value) => handleFilterChange('year', value)}>
+                                  <SelectTrigger className="w-full sm:w-[120px]">
+                                      <SelectValue placeholder="Ano" />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                      <SelectItem value="all">Todos</SelectItem>
+                                      {availableYears.map(y => (
+                                          <SelectItem key={y} value={y}>{y}</SelectItem>
                                       ))}
                                   </SelectContent>
                               </Select>
