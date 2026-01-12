@@ -29,6 +29,38 @@ const initialSettings: StoreSettings = {
 const ReceiptContent = ({ order, installment, settings, via }: { order: Order; installment: Installment; settings: StoreSettings; via: 'Empresa' | 'Cliente' }) => {
     const { products } = useData();
 
+    const customerNameWithCode = useMemo(() => {
+        const code = (order.customer.code || '').trim();
+        const name = (order.customer.name || '').trim();
+        if (!code) return name.toUpperCase();
+        return `${name} | Cód: ${code}`.toUpperCase();
+    }, [order.customer.code, order.customer.name]);
+
+    const customerAddressText = useMemo(() => {
+        const line1 = [
+            (order.customer.address || '').trim(),
+            (order.customer.number || '').trim(),
+        ].filter(Boolean).join(', ');
+
+        const complement = (order.customer.complement || '').trim();
+        const line1WithComplement = complement ? [line1, complement].filter(Boolean).join(', ') : line1;
+
+        const neighborhood = (order.customer.neighborhood || '').trim();
+        const cityState = [(order.customer.city || '').trim(), (order.customer.state || '').trim()].filter(Boolean).join('/');
+        const zip = (order.customer.zip || '').trim();
+
+        const line2 = [neighborhood, cityState, zip ? `CEP ${zip}` : ''].filter(Boolean).join(' - ');
+        return [line1WithComplement, line2].filter(Boolean).join(' - ');
+    }, [
+        order.customer.address,
+        order.customer.number,
+        order.customer.complement,
+        order.customer.neighborhood,
+        order.customer.city,
+        order.customer.state,
+        order.customer.zip,
+    ]);
+
     const productCodeById = useMemo(() => {
         const map = new Map<string, string>();
         products.forEach((p) => {
@@ -82,11 +114,10 @@ const ReceiptContent = ({ order, installment, settings, via }: { order: Order; i
 
             <div className="grid grid-cols-2 gap-x-4 border-y border-black py-2">
                 <div className="space-y-1">
-                    <p>CLIENTE: {order.customer.name.toUpperCase()}</p>
+                    <p>CLIENTE: {customerNameWithCode}</p>
                     <p>CPF: {order.customer.cpf}</p>
-                    {order.customer.code && <p>CÓD CLIENTE: {order.customer.code}</p>}
                     <p>TELEFONE: {order.customer.phone}</p>
-                    <p>ENDEREÇO: {`${order.customer.address}, ${order.customer.number}${order.customer.complement ? `, ${order.customer.complement}` : ''}`}</p>
+                    <p>ENDEREÇO: {customerAddressText}</p>
                     <p>PEDIDO: {order.id}</p>
                 </div>
                 <div className="space-y-1 text-right">
@@ -176,7 +207,7 @@ const ReceiptContent = ({ order, installment, settings, via }: { order: Order; i
             </div>
 
             <div className="flex justify-between items-center mt-8 border-t border-black pt-1">
-                <p>{settings.storeCity}/{order.customer.state}</p>
+                <p>{[settings.storeCity, order.customer.state].filter(Boolean).join('/')}</p>
                 <p className="font-bold">Via {via}</p>
                 <p>Data da Compra: {format(parseISO(order.date), "dd/MM/yyyy 'às' HH:mm")}</p>
             </div>
@@ -206,15 +237,51 @@ export default function SingleInstallmentPage() {
     const settingsRef = doc(db, 'config', 'storeSettings');
     
     Promise.all([getDoc(orderRef), getDoc(settingsRef)])
-      .then(([orderDoc, settingsDoc]) => {
+      .then(async ([orderDoc, settingsDoc]) => {
         if (orderDoc.exists()) {
-          setOrder({ id: orderDoc.id, ...orderDoc.data() } as Order);
+          let loadedOrder = { id: orderDoc.id, ...orderDoc.data() } as Order;
+          const cpf = (loadedOrder.customer?.cpf || '').replace(/\D/g, '');
+          const needsCustomerDetails =
+            !loadedOrder.customer?.code ||
+            !loadedOrder.customer?.address ||
+            !loadedOrder.customer?.number ||
+            !loadedOrder.customer?.neighborhood ||
+            !loadedOrder.customer?.city ||
+            !loadedOrder.customer?.state ||
+            !loadedOrder.customer?.zip;
+
+          if (cpf.length === 11 && needsCustomerDetails) {
+            try {
+              const customerRef = doc(db, 'customers', cpf);
+              const customerDoc = await getDoc(customerRef);
+              if (customerDoc.exists()) {
+                const customerData = customerDoc.data() as Partial<Order['customer']>;
+                loadedOrder = {
+                  ...loadedOrder,
+                  customer: {
+                    ...loadedOrder.customer,
+                    code: loadedOrder.customer.code || customerData.code,
+                    address: loadedOrder.customer.address || customerData.address || '',
+                    number: loadedOrder.customer.number || customerData.number || '',
+                    complement: loadedOrder.customer.complement || customerData.complement,
+                    neighborhood: loadedOrder.customer.neighborhood || customerData.neighborhood || '',
+                    city: loadedOrder.customer.city || customerData.city || '',
+                    state: loadedOrder.customer.state || customerData.state || '',
+                    zip: loadedOrder.customer.zip || customerData.zip || '',
+                  },
+                };
+              }
+            } catch {
+            }
+          }
+
+          setOrder(loadedOrder);
         } else {
           console.error("No such order!");
         }
 
         if (settingsDoc.exists()) {
-            setSettings(settingsDoc.data() as StoreSettings);
+          setSettings(settingsDoc.data() as StoreSettings);
         }
       })
       .catch(error => {

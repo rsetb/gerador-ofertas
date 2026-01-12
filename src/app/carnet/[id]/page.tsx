@@ -32,9 +32,47 @@ const CarnetContent = ({ order, settings, pixPayload, productCodeById }: { order
     const subtotal = useMemo(() => order.items.reduce((acc, item) => acc + (item.price * item.quantity), 0), [order.items]);
     const valorFinanciado = order.total;
     const isOrderPaidOff = useMemo(() => (order.installmentDetails || []).every((inst) => inst.status === 'Pago'), [order.installmentDetails]);
+    const productsShort = useMemo(() => {
+        const items = order.items || [];
+        if (items.length === 0) return '';
+        const first = items[0];
+        const firstCode = productCodeById.get(first.id) || '1';
+        const firstLabel = `${firstCode} - ${first.name}`;
+        if (items.length === 1) return firstLabel;
+        return `${firstLabel} (+${items.length - 1})`;
+    }, [order.items, productCodeById]);
+    const customerNameWithCode = useMemo(() => {
+        const code = (order.customer.code || '').trim();
+        if (!code) return order.customer.name;
+        return `${order.customer.name} | Cód: ${code}`;
+    }, [order.customer.code, order.customer.name]);
+    const customerAddressText = useMemo(() => {
+        const line1 = [
+            (order.customer.address || '').trim(),
+            (order.customer.number || '').trim(),
+        ].filter(Boolean).join(', ');
+
+        const complement = (order.customer.complement || '').trim();
+        const line1WithComplement = complement ? [line1, complement].filter(Boolean).join(', ') : line1;
+
+        const cityState = [(order.customer.city || '').trim(), (order.customer.state || '').trim()].filter(Boolean).join('/');
+        const neighborhood = (order.customer.neighborhood || '').trim();
+        const zip = (order.customer.zip || '').trim();
+        const line2 = [neighborhood, cityState, zip ? `CEP ${zip}` : ''].filter(Boolean).join(' - ');
+
+        return [line1WithComplement, line2].filter(Boolean).join('\n');
+    }, [
+        order.customer.address,
+        order.customer.number,
+        order.customer.complement,
+        order.customer.neighborhood,
+        order.customer.city,
+        order.customer.state,
+        order.customer.zip,
+    ]);
 
     return (
-    <div className="carnet-content-wrapper bg-white break-inside-avoid-page print:p-0 text-sm print:text-[9px] print:leading-tight flex flex-col relative">
+    <div className="carnet-content-wrapper bg-white break-inside-avoid-page print:p-0 text-sm print:text-[11px] print:leading-[1.25] flex flex-col relative">
         {isOrderPaidOff && (
             <div className="absolute top-24 right-3 pointer-events-none">
                 <div className="border-[5px] border-green-700 text-green-700 rounded-md px-5 py-2 rotate-12 opacity-80">
@@ -49,12 +87,12 @@ const CarnetContent = ({ order, settings, pixPayload, productCodeById }: { order
                     <div className="w-2" />
                     <div>
                         <p className="font-bold text-base print:text-sm">{settings.storeName}</p>
-                        <p className="whitespace-pre-line text-xs print:text-[9px]">{settings.storeAddress}</p>
+                        <p className="whitespace-pre-line text-xs print:text-[10px]">{settings.storeAddress}</p>
                     </div>
                 </div>
                 <div className="text-right">
                     {settings.storePhone && (
-                        <p className="text-muted-foreground flex items-center gap-1 justify-end text-xs print:text-[9px]"><Phone className="h-3 w-3" /> WhatsApp: {settings.storePhone}</p>
+                        <p className="text-muted-foreground flex items-center gap-1 justify-end text-xs print:text-[10px]"><Phone className="h-3 w-3" /> WhatsApp: {settings.storePhone}</p>
                     )}
                     <p className="font-semibold print:text-[10px]">Pedido Nº</p>
                     <p className="font-mono text-lg print:text-base">{order.id}</p>
@@ -64,51 +102,55 @@ const CarnetContent = ({ order, settings, pixPayload, productCodeById }: { order
 
         <div className="carnet-customer-grid grid grid-cols-1 sm:grid-cols-[1fr_1fr_0.95fr] gap-x-2 gap-y-0 py-0 print:py-0 border-b">
             <div className="sm:col-span-1 space-y-0.5">
-                <p className="text-[9px] text-muted-foreground">CLIENTE</p>
-                <p className="carnet-customer-value font-semibold">{order.customer.name}</p>
-                 <p className="text-[9px] text-muted-foreground">ENDEREÇO</p>
-                <p className="carnet-customer-value font-semibold">{`${order.customer.address}, ${order.customer.number}`}</p>
+                <p className="carnet-label text-[9px] text-muted-foreground">CLIENTE</p>
+                <p className="carnet-customer-value font-semibold">{customerNameWithCode}</p>
+                 <p className="carnet-label text-[9px] text-muted-foreground">ENDEREÇO</p>
+                <p className="carnet-customer-value font-semibold whitespace-pre-line">{customerAddressText}</p>
             </div>
              <div className="sm:col-span-1 space-y-0.5">
-                <p className="text-[9px] text-muted-foreground">CPF</p>
+                <p className="carnet-label text-[9px] text-muted-foreground">CPF</p>
                 <p className="carnet-customer-value font-semibold">
                     {order.customer.cpf || ''}
-                    {order.customer.code ? ` | Cód: ${order.customer.code}` : ''}
                 </p>
-                <p className="text-[9px] text-muted-foreground mt-0 print:mt-0">VENDEDOR(A)</p>
+                <p className="carnet-label text-[9px] text-muted-foreground mt-0 print:mt-0">VENDEDOR(A)</p>
                 <p className="carnet-customer-value font-semibold">{order.sellerName}</p>
-                <p className="text-[9px] text-muted-foreground mt-0 print:mt-0">DATA DA COMPRA</p>
+                <p className="carnet-label text-[9px] text-muted-foreground mt-0 print:mt-0">DATA DA COMPRA</p>
                 <p className="carnet-customer-value font-semibold">{format(new Date(order.date), 'dd/MM/yyyy', { locale: ptBR })}</p>
             </div>
              <div className="sm:col-span-1 sm:row-span-2 flex items-start justify-end">
                 {pixPayload && (
-                    <div className="w-full max-w-[180px] flex-shrink-0">
-                        <PixQRCode payload={pixPayload} size={768} className="p-1" />
+                    <div className="w-full flex flex-col items-end gap-1">
+                        <div className="carnet-qr w-full max-w-[180px] flex-shrink-0">
+                            <PixQRCode payload={pixPayload} size={768} className="p-1" />
+                        </div>
+                        {settings.pixKey && (
+                            <div className="w-full max-w-[180px]">
+                                <p className="carnet-label text-[9px] text-muted-foreground text-center">CHAVE PIX</p>
+                                <div className="flex items-center justify-center gap-2">
+                                    <span className="inline-flex items-center justify-center h-6 w-6 rounded-md bg-primary text-primary-foreground text-[10px] font-extrabold leading-none flex-shrink-0 print:h-5 print:w-5 print:text-[9px]">
+                                        PIX
+                                    </span>
+                                    <p className="carnet-pix-key font-mono break-all text-center text-[16px] leading-tight print:text-[13px]">
+                                        {settings.pixKey}
+                                    </p>
+                                </div>
+                            </div>
+                        )}
                     </div>
                 )}
-            </div>
-            <div className="sm:col-span-2 sm:col-start-1 pt-0 print:pt-0 -mt-2 print:-mt-3">
-                <p className="text-[9px] text-muted-foreground">PRODUTOS</p>
-                <p className="carnet-products-value font-semibold text-base sm:text-lg print:text-[13px] print:leading-tight">
-                    {order.items
-                      .map((item, index) => {
-                        const code = productCodeById.get(item.id) || String(index + 1);
-                        return `${code} - ${item.name}`;
-                      })
-                      .join(', ')}
-                </p>
             </div>
         </div>
         
         <div className="flex-grow mt-0.5 print:mt-0 border rounded-md overflow-hidden flex flex-col">
-            <div className="overflow-y-auto">
+            <div className="overflow-y-auto print:overflow-visible">
                 <table className="carnet-installments-table w-full text-sm print:text-[11px]">
                     <thead className="bg-muted/50 print:bg-gray-100">
                         <tr className="border-b">
-                            <th className="px-2 py-1 print:px-1 print:py-0.5 text-center font-semibold w-[15%]">Parc.</th>
-                            <th className="px-2 py-1 print:px-1 print:py-0.5 text-left font-semibold w-[25%]">Venc.</th>
-                            <th className="px-2 py-1 print:px-1 print:py-0.5 text-right font-semibold w-[25%]">Valor (R$)</th>
-                            <th className="px-2 py-1 print:px-1 print:py-0.5 text-left font-semibold w-[35%]">Data Pag.</th>
+                            <th className="px-2 py-1 print:px-1 print:py-0.5 text-center font-semibold w-[12%]">Parc.</th>
+                            <th className="px-2 py-1 print:px-1 print:py-0.5 text-left font-semibold w-[16%]">Venc.</th>
+                            <th className="px-2 py-1 print:px-1 print:py-0.5 text-left font-semibold w-[32%]">Produto</th>
+                            <th className="px-2 py-1 print:px-1 print:py-0.5 text-right font-semibold w-[18%]">Valor (R$)</th>
+                            <th className="px-2 py-1 print:px-1 print:py-0.5 text-left font-semibold w-[22%]">Data Pag.</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -116,11 +158,12 @@ const CarnetContent = ({ order, settings, pixPayload, productCodeById }: { order
                             <tr key={installment.installmentNumber} className="border-b last:border-none">
                                 <td className="px-2 py-1 print:px-1 print:py-0.5 text-center font-semibold">{installment.installmentNumber}/{order.installments}</td>
                                 <td className="px-2 py-1 print:px-1 print:py-0.5 font-semibold">{format(parseISO(installment.dueDate), 'dd/MM/yy')}</td>
+                                <td className="px-2 py-1 print:px-1 print:py-0.5 font-semibold truncate">{productsShort}</td>
                                 <td className="px-2 py-1 print:px-1 print:py-0.5 text-right font-mono font-semibold">{formatCurrency(installment.amount)}</td>
                                 <td className="px-2 py-1 print:px-1 print:py-0.5 border-l">
                                     {installment.status === 'Pago' 
                                         ? (installment.paymentDate ? format(parseISO(installment.paymentDate), 'dd/MM/yy') : 'Pago')
-                                        : '___/__/____'
+                                        : '\u00A0'
                                     }
                                 </td>
                             </tr>
@@ -162,12 +205,12 @@ const CarnetContent = ({ order, settings, pixPayload, productCodeById }: { order
 
         {order.observations && (
             <div className="py-1 border-t mt-1">
-                <p className="text-[9px] text-muted-foreground">OBSERVAÇÕES:</p>
+                <p className="carnet-label text-[9px] text-muted-foreground">OBSERVAÇÕES:</p>
                 <p className="font-semibold whitespace-pre-line text-xs print:text-[10px]">{order.observations}</p>
             </div>
         )}
         
-        <div className="mt-0.5 print:mt-0 pt-0.5 print:pt-0 text-[9px] print:text-[8px] text-muted-foreground border-t">
+        <div className="carnet-important mt-0.5 print:mt-0 pt-0.5 print:pt-0 text-[9px] print:text-[8px] text-muted-foreground border-t">
             <p className="font-semibold">Importante:</p>
             <ol className="list-decimal list-inside">
                 <li>O pagamento pode ser realizado na loja ou via PIX (solicite o código ao vendedor).</li>
@@ -197,9 +240,45 @@ export default function CarnetPage() {
     const settingsRef = doc(db, 'config', 'storeSettings');
     
     Promise.all([getDoc(orderRef), getDoc(settingsRef)])
-      .then(([orderDoc, settingsDoc]) => {
+      .then(async ([orderDoc, settingsDoc]) => {
         if (orderDoc.exists()) {
-          setOrder({ id: orderDoc.id, ...orderDoc.data() } as Order);
+          let loadedOrder = { id: orderDoc.id, ...orderDoc.data() } as Order;
+          const cpf = (loadedOrder.customer?.cpf || '').replace(/\D/g, '');
+          const needsCustomerDetails =
+            !loadedOrder.customer?.code ||
+            !loadedOrder.customer?.address ||
+            !loadedOrder.customer?.number ||
+            !loadedOrder.customer?.neighborhood ||
+            !loadedOrder.customer?.city ||
+            !loadedOrder.customer?.state ||
+            !loadedOrder.customer?.zip;
+
+          if (cpf.length === 11 && needsCustomerDetails) {
+            try {
+              const customerRef = doc(db, 'customers', cpf);
+              const customerDoc = await getDoc(customerRef);
+              if (customerDoc.exists()) {
+                const customerData = customerDoc.data() as Partial<Order['customer']>;
+                loadedOrder = {
+                  ...loadedOrder,
+                  customer: {
+                    ...loadedOrder.customer,
+                    code: loadedOrder.customer.code || customerData.code,
+                    address: loadedOrder.customer.address || customerData.address || '',
+                    number: loadedOrder.customer.number || customerData.number || '',
+                    complement: loadedOrder.customer.complement || customerData.complement,
+                    neighborhood: loadedOrder.customer.neighborhood || customerData.neighborhood || '',
+                    city: loadedOrder.customer.city || customerData.city || '',
+                    state: loadedOrder.customer.state || customerData.state || '',
+                    zip: loadedOrder.customer.zip || customerData.zip || '',
+                  },
+                };
+              }
+            } catch {
+            }
+          }
+
+          setOrder(loadedOrder);
         } else {
           console.error("No such order!");
         }

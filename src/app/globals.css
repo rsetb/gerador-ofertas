@@ -70,7 +70,6 @@
 
 @media print {
   @page {
-    size: A4 landscape;
     margin: 6mm;
   }
 
@@ -87,28 +86,124 @@
   }
 
   body.print-layout-a4 .carnet-content-wrapper {
-    transform: scale(0.98);
+    transform: scale(1);
     transform-origin: top left;
   }
 
+  body.print-layout-default .carnet-content-wrapper {
+    font-size: 11px !important;
+    line-height: 1.25 !important;
+  }
+
+  body.print-layout-a4 .carnet-content-wrapper {
+    font-size: 12px !important;
+    line-height: 1.25 !important;
+  }
+
   body.print-layout-default .carnet-installments-table {
-    font-size: 10px !important;
-    line-height: 1.15 !important;
+    font-size: 12px !important;
+    line-height: 1.25 !important;
   }
 
   body.print-layout-a4 .carnet-installments-table {
-    font-size: 11px !important;
-    line-height: 1.15 !important;
+    font-size: 13px !important;
+    line-height: 1.25 !important;
+  }
+
+  body.print-layout-default .carnet-customer-value {
+    font-size: 13px !important;
+    line-height: 1.25 !important;
   }
 
   body.print-layout-a4 .carnet-customer-value {
-    font-size: 11px !important;
+    font-size: 16px !important;
     line-height: 1.2 !important;
   }
 
+  body.print-layout-default .carnet-products-value {
+    font-size: 15px !important;
+    line-height: 1.25 !important;
+  }
+
   body.print-layout-a4 .carnet-products-value {
-    font-size: 13px !important;
+    font-size: 15px !important;
+    line-height: 1.25 !important;
+  }
+
+  body.print-layout-default .carnet-label,
+  body.print-layout-a4 .carnet-label {
+    font-size: 12px !important;
     line-height: 1.2 !important;
+  }
+
+  body.print-layout-a4 .carnet-label {
+    font-size: 15px !important;
+    line-height: 1.15 !important;
+  }
+
+  body.print-layout-a4 .carnet-customer-grid .carnet-label {
+    font-size: 15px !important;
+    line-height: 1.15 !important;
+  }
+
+  body.print-layout-a4 .carnet-customer-grid .carnet-customer-value {
+    font-size: 16px !important;
+    line-height: 1.2 !important;
+  }
+
+  body.print-layout-default .carnet-pix-key,
+  body.print-layout-a4 .carnet-pix-key {
+    font-size: 14px !important;
+    line-height: 1.25 !important;
+  }
+
+  body.print-layout-default .carnet-important,
+  body.print-layout-a4 .carnet-important {
+    font-size: 12px !important;
+    line-height: 1.3 !important;
+  }
+
+  body.print-layout-default .carnet-pix-key .font-mono,
+  body.print-layout-a4 .carnet-pix-key .font-mono {
+    font-size: inherit !important;
+    line-height: 1.2 !important;
+  }
+
+  body.print-layout-default .carnet-installments-table th,
+  body.print-layout-default .carnet-installments-table td {
+    padding-top: 4px !important;
+    padding-bottom: 4px !important;
+  }
+
+  body.print-layout-a4 .carnet-installments-table th,
+  body.print-layout-a4 .carnet-installments-table td {
+    padding-top: 4px !important;
+    padding-bottom: 4px !important;
+  }
+
+  body.print-layout-default .carnet-installments-table th,
+  body.print-layout-a4 .carnet-installments-table th {
+    padding-left: 6px !important;
+    padding-right: 6px !important;
+  }
+
+  body.print-layout-default .carnet-installments-table td,
+  body.print-layout-a4 .carnet-installments-table td {
+    padding-left: 6px !important;
+    padding-right: 6px !important;
+  }
+
+  body.print-layout-a4 .carnet-qr {
+    max-width: 140px !important;
+  }
+
+  body.print-layout-default .container,
+  body.print-layout-a4 .container {
+    max-width: none !important;
+    width: 100% !important;
+    margin: 0 !important;
+    padding-left: 0 !important;
+    padding-right: 0 !important;
   }
 
   .receipt-main-values {
@@ -166,6 +261,34 @@
   
   .page-break-before {
     page-break-before: always;
+  }
+}
+
+@media print and (orientation: portrait) {
+  body.print-layout-default .print-default\:grid {
+    display: block !important;
+  }
+
+  body.print-layout-default .print-default\:border-r {
+    border-right-width: 0 !important;
+  }
+
+  body.print-layout-default .print-default\:pr-4 {
+    padding-right: 0 !important;
+  }
+
+  body.print-layout-default .print-default\:pl-4 {
+    padding-left: 0 !important;
+  }
+
+  body.print-layout-default .print-default\:block {
+    display: none !important;
+  }
+}
+
+@media print and (orientation: landscape) {
+  body.print-layout-a4 .carnet-qr {
+    max-width: 160px !important;
   }
 }
 
