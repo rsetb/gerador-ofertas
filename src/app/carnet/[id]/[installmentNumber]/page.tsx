@@ -46,6 +46,11 @@ const ReceiptContent = ({ order, installment, settings, via }: { order: Order; i
     const totalPaidOnInstallment = installment.paidAmount || 0;
     const isPaid = installment.status === 'Pago';
     const remainingBalance = isPaid ? 0 : installment.amount - totalPaidOnInstallment;
+    const isOrderPaidOff = useMemo(() => {
+        const installmentsPaid = (order.installmentDetails || []).every((inst) => inst.status === 'Pago');
+        const immediatePaid = !!order.paymentMethod && ['Pix', 'Dinheiro'].includes(order.paymentMethod);
+        return installmentsPaid || immediatePaid;
+    }, [order.installmentDetails, order.paymentMethod]);
     
     const valorOriginal = useMemo(() => {
         const subtotal = order.items.reduce((acc, item) => acc + (item.price * item.quantity), 0);
@@ -56,6 +61,13 @@ const ReceiptContent = ({ order, installment, settings, via }: { order: Order; i
 
     return (
         <div className="bg-white break-inside-avoid-page text-black font-mono text-xs relative print:p-0">
+             {isOrderPaidOff && (
+                <div className="absolute top-24 right-3 pointer-events-none">
+                    <div className="border-[5px] border-green-700 text-green-700 rounded-md px-5 py-2 rotate-12 opacity-80">
+                        <p className="text-2xl font-black tracking-widest">QUITADO</p>
+                    </div>
+                </div>
+            )}
              <div className="flex justify-between items-start mb-4">
                 <div className="flex items-center">
                     <Logo />

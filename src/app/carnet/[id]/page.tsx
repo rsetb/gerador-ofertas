@@ -31,9 +31,17 @@ const CarnetContent = ({ order, settings, pixPayload, productCodeById }: { order
     
     const subtotal = useMemo(() => order.items.reduce((acc, item) => acc + (item.price * item.quantity), 0), [order.items]);
     const valorFinanciado = order.total;
+    const isOrderPaidOff = useMemo(() => (order.installmentDetails || []).every((inst) => inst.status === 'Pago'), [order.installmentDetails]);
 
     return (
-    <div className="carnet-content-wrapper bg-white break-inside-avoid-page print:p-0 text-sm print:text-[9px] print:leading-tight flex flex-col">
+    <div className="carnet-content-wrapper bg-white break-inside-avoid-page print:p-0 text-sm print:text-[9px] print:leading-tight flex flex-col relative">
+        {isOrderPaidOff && (
+            <div className="absolute top-24 right-3 pointer-events-none">
+                <div className="border-[5px] border-green-700 text-green-700 rounded-md px-5 py-2 rotate-12 opacity-80">
+                    <p className="text-2xl print:text-xl font-black tracking-widest">QUITADO</p>
+                </div>
+            </div>
+        )}
         <div className="pb-1 border-b">
             <div className="flex justify-between items-start">
                 <div className="flex items-center">
@@ -44,7 +52,7 @@ const CarnetContent = ({ order, settings, pixPayload, productCodeById }: { order
                         <p className="whitespace-pre-line text-xs print:text-[9px]">{settings.storeAddress}</p>
                     </div>
                 </div>
-                 <div className="text-right">
+                <div className="text-right">
                     {settings.storePhone && (
                         <p className="text-muted-foreground flex items-center gap-1 justify-end text-xs print:text-[9px]"><Phone className="h-3 w-3" /> WhatsApp: {settings.storePhone}</p>
                     )}
