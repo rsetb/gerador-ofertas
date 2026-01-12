@@ -120,6 +120,11 @@ export type Order = {
   isCommissionManual?: boolean;
   observations?: string;
   source?: 'Online' | 'Manual';
+  createdAt?: string;
+  createdById?: string;
+  createdByName?: string;
+  createdByRole?: OrderCreatorRole;
+  createdIp?: string;
 };
 
 export type CommissionPayment = {
@@ -133,6 +138,8 @@ export type CommissionPayment = {
 };
 
 export type UserRole = 'admin' | 'gerente' | 'vendedor';
+
+export type OrderCreatorRole = UserRole | 'cliente';
 
 export type User = {
   id: string;

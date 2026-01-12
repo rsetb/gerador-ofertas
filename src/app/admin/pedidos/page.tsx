@@ -350,8 +350,8 @@ export default function OrdersAdminPage() {
 
   const handleCalculateCommission = () => {
     if (!selectedOrder) return;
-    const commissionValue = selectedOrder.commission || 0;
-    setCommissionInput(formatBRL(commissionValue));
+    updateOrderDetails(selectedOrder.id, { isCommissionManual: false }, logAction, user);
+    toast({ title: 'Comissão Recalculada!', description: `A comissão do pedido #${selectedOrder.id} foi recalculada.` });
   };
 
   const handleUpdateCommission = () => {
@@ -856,7 +856,7 @@ Não esqueça de enviar o comprovante!`;
                           Gerencie o status, faturamento e detalhes do pedido.
                       </CardDescription>
                   </DialogHeader>
-                  <div className="flex-grow overflow-y-auto p-1 pr-4 -mr-4 space-y-6">
+                      <div className="flex-grow overflow-y-auto p-1 pr-4 -mr-4 space-y-6">
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                           <Card>
                             <CardHeader className="flex-row items-center gap-4 space-y-0 pb-4">
@@ -939,6 +939,18 @@ Não esqueça de enviar o comprovante!`;
                             </CardContent>
                           </Card>
                       </div>
+
+                      <Card>
+                        <CardHeader className="flex-row items-center gap-4 space-y-0 pb-4">
+                          <Clock className="w-8 h-8 text-primary" />
+                          <CardTitle className="text-lg">Criação</CardTitle>
+                        </CardHeader>
+                        <CardContent className="text-sm space-y-1">
+                          <p><strong>Criado por:</strong> {selectedOrder.createdByName || '-'}</p>
+                          <p><strong>Data/Hora:</strong> {selectedOrder.createdAt ? format(parseISO(selectedOrder.createdAt), "dd/MM/yyyy 'às' HH:mm") : '-'}</p>
+                          <p><strong>IP:</strong> {selectedOrder.createdIp || '-'}</p>
+                        </CardContent>
+                      </Card>
                       
                       <Card>
                         <CardHeader className="flex-row items-center gap-4 space-y-0 pb-4">

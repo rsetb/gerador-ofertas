@@ -31,17 +31,17 @@ const calculateCommission = (order: Order, allProducts: Product[]) => {
         return 0;
     }
 
+    const fallbackPercentage = 5;
+
     // Otherwise, calculate based on product rules.
     return order.items.reduce((totalCommission, item) => {
         const product = allProducts.find(p => p.id === item.id);
         
-        // If product doesn't exist in catalog (e.g., custom item) or has no commission value, skip it.
-        if (!product || typeof product.commissionValue === 'undefined' || product.commissionValue === null) {
-            return totalCommission;
-        }
+        const hasExplicitCommissionValue =
+          product && typeof product.commissionValue === 'number' && !Number.isNaN(product.commissionValue);
         
-        const commissionType = product.commissionType || 'percentage'; // Default to percentage
-        const commissionValue = product.commissionValue;
+        const commissionType = hasExplicitCommissionValue ? (product!.commissionType || 'percentage') : 'percentage';
+        const commissionValue = hasExplicitCommissionValue ? product!.commissionValue! : fallbackPercentage;
 
         if (commissionType === 'fixed') {
             return totalCommission + (commissionValue * item.quantity);
@@ -921,6 +921,58 @@ export const AdminProvider = ({ children }: { children: ReactNode }) => {
       orderToSave.installmentDetails = recalculateInstallments(totalFinanced, orderToSave.installments, orderId, order.firstDueDate.toISOString())
       orderToSave.installmentValue = orderToSave.installmentDetails[0]?.amount || 0;
     }
+
+    const createdAt = new Date().toISOString();
+    orderToSave.createdAt = createdAt;
+    orderToSave.createdById = user?.id || '';
+    orderToSave.createdByName = user?.name || orderToSave.customer?.name || '';
+    orderToSave.createdByRole = user?.role || 'cliente';
+    const normalizeIp = (raw: string) => {
+      let ip = (raw || '').trim();
+      if (!ip) return '';
+      if (ip.includes(',')) ip = ip.split(',')[0]?.trim() || '';
+      if (ip.startsWith('[')) {
+        const idx = ip.indexOf(']');
+        if (idx > 1) ip = ip.slice(1, idx);
+      } else {
+        const parts = ip.split(':');
+        if (parts.length === 2 && /^\d{1,3}(\.\d{1,3}){3}$/.test(parts[0] || '')) {
+          ip = parts[0] || '';
+        }
+      }
+      if (ip.startsWith('::ffff:')) ip = ip.replace('::ffff:', '');
+      return ip.trim();
+    };
+    const isPrivateIp = (ip: string) => {
+      if (!ip) return true;
+      if (ip === '::1' || ip === '127.0.0.1' || ip === '0.0.0.0') return true;
+      if (ip.startsWith('10.') || ip.startsWith('192.168.') || ip.startsWith('169.254.')) return true;
+      if (/^172\.(1[6-9]|2\d|3[0-1])\./.test(ip)) return true;
+      if (ip.startsWith('fc') || ip.startsWith('fd') || ip.startsWith('fe80:')) return true;
+      return false;
+    };
+    let detectedIp = '';
+    try {
+      const res = await fetch('/api/ip', { method: 'GET', cache: 'no-store' });
+      if (res.ok) {
+        const data = (await res.json()) as { ip?: string | null };
+        detectedIp = normalizeIp(data.ip || '');
+      }
+    } catch {
+      detectedIp = '';
+    }
+    if (!detectedIp || isPrivateIp(detectedIp)) {
+      try {
+        const res = await fetch('https://api.ipify.org?format=json', { method: 'GET', cache: 'no-store' });
+        if (res.ok) {
+          const data = (await res.json()) as { ip?: string };
+          const publicIp = normalizeIp(data.ip || '');
+          if (publicIp) detectedIp = publicIp;
+        }
+      } catch {
+      }
+    }
+    orderToSave.createdIp = detectedIp || '';
     
     try {
       if (!await manageStockForOrder(orderToSave, 'subtract')) {
@@ -1567,7 +1619,8 @@ export const AdminProvider = ({ children }: { children: ReactNode }) => {
     const { downPayment, resetDownPayment, ...otherDetails } = details;
     detailsToUpdate = otherDetails;
     
-    const subtotal = order.items.reduce((acc, item) => acc + item.price * item.quantity, 0);
+    const itemsToUse = otherDetails.items ?? order.items;
+    const subtotal = itemsToUse.reduce((acc, item) => acc + item.price * item.quantity, 0);
 
     const hasInstallmentsChanged = details.installments && details.installments !== order.installments;
     const hasDiscountChanged = details.discount !== undefined && details.discount !== order.discount;
@@ -1604,6 +1657,22 @@ export const AdminProvider = ({ children }: { children: ReactNode }) => {
             downPayment: currentDownPayment,
         };
     }
+
+    const hasSellerIdChanged = otherDetails.sellerId !== undefined && otherDetails.sellerId !== order.sellerId;
+    const shouldRecalculateCommission =
+      otherDetails.sellerId !== undefined ||
+      otherDetails.items !== undefined ||
+      otherDetails.isCommissionManual !== undefined ||
+      otherDetails.commission !== undefined ||
+      (order.sellerId && (order.commission === undefined || order.commission === null));
+
+    if (shouldRecalculateCommission) {
+        const updatedOrderForCommission = { ...order, ...detailsToUpdate, items: itemsToUse } as Order;
+        detailsToUpdate.commission = calculateCommission(updatedOrderForCommission, products);
+        if (hasSellerIdChanged) {
+            detailsToUpdate.commissionPaid = false;
+        }
+    }
     
     const orderRef = doc(db, 'orders', orderId);
     updateDoc(orderRef, detailsToUpdate).then(() => {
@@ -1616,7 +1685,7 @@ export const AdminProvider = ({ children }: { children: ReactNode }) => {
           requestResourceData: detailsToUpdate,
       }));
     });
-  }, [orders, toast]);
+  }, [orders, products, toast]);
 
   const payCommissions = useCallback(async (sellerId: string, sellerName: string, amount: number, orderIds: string[], period: string, logAction: LogAction, user: User | null): Promise<string | null> => {
     const { db } = getClientFirebase();
