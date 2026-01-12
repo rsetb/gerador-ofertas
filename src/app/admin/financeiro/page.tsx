@@ -26,6 +26,10 @@ const formatCurrency = (value: number) => {
   return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(value);
 };
 
+const formatOrderProducts = (items: Order['items']) => {
+  return items.map((item) => `${item.quantity}x ${item.name}`).join(', ');
+};
+
 type SellerCommissionDetails = {
     id: string;
     name: string;
@@ -694,12 +698,12 @@ export default function FinanceiroPage() {
                 </div>
                 <div className="hidden print-only space-y-1 text-sm">
                     <div className="font-semibold border-b pb-1">
-                        Data | Pedido | Cliente | Valor | Comissão
+                        Data | Pedido | Cliente | Produtos | Valor | Comissão
                     </div>
                     {(selectedPerformanceSeller?.orders.length ?? 0) > 0 ? (
                         selectedPerformanceSeller?.orders.map(order => (
                             <div key={order.id} className="border-b py-1">
-                                {format(parseISO(order.date), "dd/MM/yy")} | {order.id} | {order.customer.name} | {formatCurrency(order.total)} | {formatCurrency(order.commission || 0)}
+                                {format(parseISO(order.date), "dd/MM/yy")} | {order.id} | {order.customer.name} | {formatOrderProducts(order.items)} | {formatCurrency(order.total)} | {formatCurrency(order.commission || 0)}
                             </div>
                         ))
                     ) : (
@@ -715,6 +719,7 @@ export default function FinanceiroPage() {
                                 <TableHead>Data</TableHead>
                                 <TableHead>Pedido</TableHead>
                                 <TableHead>Cliente</TableHead>
+                                <TableHead>Produtos</TableHead>
                                 <TableHead className="text-right">Valor da Venda</TableHead>
                                 <TableHead className="text-right">Comissão</TableHead>
                             </TableRow>
@@ -726,13 +731,16 @@ export default function FinanceiroPage() {
                                         <TableCell>{format(parseISO(order.date), "dd/MM/yy")}</TableCell>
                                         <TableCell className="font-mono">{order.id}</TableCell>
                                         <TableCell>{order.customer.name}</TableCell>
+                                        <TableCell className="max-w-[260px] truncate" title={formatOrderProducts(order.items)}>
+                                          {formatOrderProducts(order.items)}
+                                        </TableCell>
                                         <TableCell className="text-right font-semibold">{formatCurrency(order.total)}</TableCell>
                                         <TableCell className="text-right font-semibold">{formatCurrency(order.commission || 0)}</TableCell>
                                     </TableRow>
                                 ))
                             ) : (
                                 <TableRow>
-                                    <TableCell colSpan={5} className="h-24 text-center">Nenhuma venda encontrada para este vendedor.</TableCell>
+                                    <TableCell colSpan={6} className="h-24 text-center">Nenhuma venda encontrada para este vendedor.</TableCell>
                                 </TableRow>
                             )}
                         </TableBody>
