@@ -388,7 +388,7 @@ export default function CreateOrderPage() {
                           </Button>
                         </FormControl>
                       </PopoverTrigger>
-                      <PopoverContent className="w-[--radix-popover-trigger-width] p-0">
+                      <PopoverContent className="w-[--radix-popover-trigger-width] p-0 pointer-events-auto">
                         <Command>
                            <CommandInput 
                             placeholder="Buscar cliente por nome ou CPF..."
@@ -401,7 +401,17 @@ export default function CreateOrderPage() {
                                 return (
                                 <CommandItem
                                   key={customerId}
+                                  value={`${c.code || ''} ${c.name} ${c.cpf || ''} ${c.phone || ''}`.trim()}
+                                  onMouseDown={(e) => {
+                                    e.preventDefault();
+                                    e.stopPropagation();
+                                  }}
+                                  className="cursor-pointer"
                                   onSelect={() => {
+                                    form.setValue("customerId", customerId, { shouldValidate: true });
+                                    setOpenCustomerPopover(false);
+                                  }}
+                                  onClick={() => {
                                     form.setValue("customerId", customerId, { shouldValidate: true });
                                     setOpenCustomerPopover(false);
                                   }}
@@ -409,7 +419,10 @@ export default function CreateOrderPage() {
                                   <Check className={cn("mr-2 h-4 w-4", customerId === field.value ? "opacity-100" : "opacity-0")} />
                                   <div className="flex flex-col items-start text-left">
                                       <span>{c.name}</span>
-                                      <span className="text-xs text-muted-foreground">{c.cpf || c.phone}</span>
+                                      <span className="text-xs text-muted-foreground">
+                                        {c.code ? `${c.code} • ` : ''}
+                                        {c.cpf || c.phone}
+                                      </span>
                                   </div>
                                 </CommandItem>
                                 )
