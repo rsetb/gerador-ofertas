@@ -6,7 +6,7 @@ import React, { createContext, useContext, ReactNode, useCallback, useState, use
 import type { Order, Product, Installment, CustomerInfo, Category, User, CommissionPayment, Payment, StockAudit, Avaria, ChatSession } from '@/lib/types';
 import { useToast } from '@/hooks/use-toast';
 import { getClientFirebase } from '@/lib/firebase-client';
-import { collection, doc, writeBatch, setDoc, updateDoc, deleteDoc, getDocs, query, orderBy, onSnapshot } from 'firebase/firestore';
+import { collection, doc, writeBatch, setDoc, updateDoc, deleteDoc, getDoc, getDocs, query, orderBy, onSnapshot } from 'firebase/firestore';
 import { errorEmitter } from '@/firebase/error-emitter';
 import { FirestorePermissionError } from '@/firebase/errors';
 import { useData } from './DataContext';
@@ -14,6 +14,7 @@ import { addMonths, format, parseISO } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { useAuth } from './AuthContext';
 import { allocateNextCustomerCode, formatCustomerCode, reserveCustomerCodes } from '@/lib/customer-code';
+import { normalizeCpf } from '@/lib/customer-trash';
 
 // Helper function to log actions, passed as an argument now
 type LogAction = (action: string, details: string, user: User | null) => void;
@@ -96,9 +97,12 @@ function sanitizeCustomerForFirestore(customer: CustomerInfo): Record<string, an
     return obj;
 }
 
+const canAccessCustomersTrash = (u: User | null) => u?.role === 'admin' || u?.role === 'gerente';
+
 
 interface AdminContextType {
   addOrder: (order: Partial<Order> & { firstDueDate: Date }, logAction: LogAction, user: User | null) => Promise<Order | null>;
+  addCustomer: (customerData: CustomerInfo, logAction: LogAction, user: User | null) => Promise<void>;
   generateCustomerCodes: (logAction: LogAction, user: User | null) => Promise<{ newCustomers: number; updatedOrders: number }>;
   deleteOrder: (orderId: string, logAction: LogAction, user: User | null) => Promise<void>;
   permanentlyDeleteOrder: (orderId: string, logAction: LogAction, user: User | null) => Promise<void>;
@@ -109,6 +113,7 @@ interface AdminContextType {
   updateInstallmentAmount: (orderId: string, installmentNumber: number, newAmount: number, logAction: LogAction, user: User | null) => Promise<void>;
   updateCustomer: (oldCustomer: CustomerInfo, updatedCustomerData: CustomerInfo, logAction: LogAction, user: User | null) => Promise<void>;
   deleteCustomer: (customer: CustomerInfo, logAction: LogAction, user: User | null) => Promise<void>;
+  restoreCustomerFromTrash: (customer: CustomerInfo, logAction: LogAction, user: User | null) => Promise<void>;
   importCustomers: (csvData: string, logAction: LogAction, user: User | null) => Promise<void>;
   updateOrderDetails: (orderId: string, details: Partial<Order> & { downPayment?: number, resetDownPayment?: boolean }, logAction: LogAction, user: User | null) => Promise<void>;
   addProduct: (productData: Omit<Product, 'id' | 'data-ai-hint' | 'createdAt'>, logAction: LogAction, user: User | null) => Promise<void>;
@@ -162,6 +167,8 @@ export const AdminProvider = ({ children }: { children: ReactNode }) => {
   const [stockAudits, setStockAudits] = useState<StockAudit[]>([]);
   const [avarias, setAvarias] = useState<Avaria[]>([]);
   const [chatSessions, setChatSessions] = useState<ChatSession[]>([]);
+  const [customers, setCustomers] = useState<CustomerInfo[]>([]);
+  const [deletedCustomers, setDeletedCustomers] = useState<CustomerInfo[]>([]);
 
   // Effect for fetching admin-specific data
   useEffect(() => {
@@ -184,30 +191,113 @@ export const AdminProvider = ({ children }: { children: ReactNode }) => {
     return () => unsubscribes.forEach(unsub => unsub());
   }, []);
 
-  // Memos for derived data, now living in AdminContext
-  const { customers, deletedCustomers } = useMemo(() => {
-    const customerMap = new Map<string, { customer: CustomerInfo, hasActiveOrder: boolean }>();
+  const addCustomer = useCallback(async (customerData: CustomerInfo, logAction: LogAction, user: User | null) => {
+    const { db } = getClientFirebase();
+    const cpf = normalizeCpf(customerData.cpf || '');
+    if (cpf.length !== 11) {
+      toast({ title: 'Erro', description: 'CPF inválido.', variant: 'destructive' });
+      return;
+    }
+
+    const customerRef = doc(db, 'customers', cpf);
+    const existing = await getDoc(customerRef);
+    if (existing.exists()) {
+      toast({ title: 'Erro', description: 'Um cliente com este CPF já existe.', variant: 'destructive' });
+      return;
+    }
+
+    const now = new Date().toISOString();
+    const code = (customerData.code || '').trim() || await allocateNextCustomerCode(db);
+    const customerToSave: CustomerInfo = {
+      ...customerData,
+      cpf,
+      code,
+    };
+
+    // Fluxo de dados do cadastro:
+    // UI -> validação do formulário -> gravação em /customers (tabela principal) -> toast de sucesso.
+    try {
+      await setDoc(customerRef, {
+        ...sanitizeCustomerForFirestore(customerToSave),
+        createdAt: now,
+        updatedAt: now,
+        createdBy: user?.id,
+        createdByName: user?.name,
+      });
+      logAction('Cadastro de Cliente', `Cliente ${customerToSave.name} (CPF: ${cpf}) foi cadastrado.`, user);
+      toast({ title: 'Cliente Cadastrado!', description: `${customerToSave.name} foi adicionado(a) com sucesso.` });
+    } catch (e) {
+      errorEmitter.emit('permission-error', new FirestorePermissionError({ path: customerRef.path, operation: 'create' }));
+    }
+  }, [toast]);
+
+  useEffect(() => {
+    const { db } = getClientFirebase();
+    const unsubscribes: Array<() => void> = [];
+
+    const customersQuery = query(collection(db, 'customers'), orderBy('name', 'asc'));
+    unsubscribes.push(
+      onSnapshot(
+        customersQuery,
+        (snapshot) => {
+          setCustomers(snapshot.docs.map((d) => d.data() as CustomerInfo));
+        },
+        (error) => console.error('Error fetching customers:', error)
+      )
+    );
+
+    const canAccessTrash = user?.role === 'admin' || user?.role === 'gerente';
+    if (canAccessTrash) {
+      const customersTrashQuery = query(collection(db, 'customersTrash'), orderBy('deletedAt', 'desc'));
+      unsubscribes.push(
+        onSnapshot(
+          customersTrashQuery,
+          (snapshot) => {
+            setDeletedCustomers(snapshot.docs.map((d) => d.data() as CustomerInfo));
+          },
+          (error) => console.error('Error fetching customersTrash:', error)
+        )
+      );
+    } else {
+      setDeletedCustomers([]);
+    }
+
+    return () => unsubscribes.forEach((unsub) => unsub());
+  }, [user?.role]);
+
+  const legacyCustomers = useMemo(() => {
+    const customerMap = new Map<string, CustomerInfo>();
     const sortedOrders = [...orders].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
 
-    sortedOrders.forEach(order => {
-        const customerKey = order.customer.cpf ? order.customer.cpf.replace(/\D/g, '') : `${order.customer.name}-${order.customer.phone}`;
-        if (!customerKey) return;
-
-        const existing = customerMap.get(customerKey);
-        
-        if (!existing) {
-             customerMap.set(customerKey, { customer: order.customer, hasActiveOrder: order.status !== 'Excluído' });
-        } else if (order.status !== 'Excluído') {
-            existing.hasActiveOrder = true;
-        }
+    sortedOrders.forEach((order) => {
+      const cpf = normalizeCpf(order.customer.cpf || '');
+      if (!cpf) return;
+      if (!customerMap.has(cpf)) customerMap.set(cpf, { ...order.customer, cpf });
     });
-    
-    const all = Array.from(customerMap.values());
-    const active = all.filter(item => item.hasActiveOrder).map(item => item.customer).sort((a, b) => a.name.localeCompare(b.name));
-    const deleted = all.filter(item => !item.hasActiveOrder).map(item => item.customer).sort((a, b) => a.name.localeCompare(b.name));
 
-    return { customers: active, deletedCustomers: deleted };
+    return Array.from(customerMap.values()).sort((a, b) => a.name.localeCompare(b.name));
   }, [orders]);
+
+  const customersForUI = useMemo(() => {
+    const deletedCpfSet = new Set(deletedCustomers.map((c) => normalizeCpf(c.cpf || '')));
+    const byCpf = new Map<string, CustomerInfo>();
+
+    customers.forEach((c) => {
+      const cpf = normalizeCpf(c.cpf || '');
+      if (!cpf) return;
+      byCpf.set(cpf, { ...c, cpf });
+    });
+
+    legacyCustomers.forEach((c) => {
+      const cpf = normalizeCpf(c.cpf || '');
+      if (!cpf) return;
+      if (!byCpf.has(cpf)) byCpf.set(cpf, { ...c, cpf });
+    });
+
+    return Array.from(byCpf.values())
+      .filter((c) => !deletedCpfSet.has(normalizeCpf(c.cpf || '')))
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }, [customers, deletedCustomers, legacyCustomers]);
   
   const customerOrders = useMemo(() => {
     const ordersByCustomer: { [key: string]: Order[] } = {};
@@ -226,7 +316,7 @@ export const AdminProvider = ({ children }: { children: ReactNode }) => {
 
   const customerFinancials = useMemo(() => {
       const financialsByCustomer: { [key: string]: { totalComprado: number, totalPago: number, saldoDevedor: number } } = {};
-      const allCustomers = [...customers, ...deletedCustomers];
+      const allCustomers = [...customersForUI, ...deletedCustomers];
       allCustomers.forEach(customer => {
         const customerKey = customer.cpf?.replace(/\D/g, '') || `${customer.name}-${customer.phone}`;
         const ordersForCustomer = (customerOrders[customerKey] || []).filter(o => o.status !== 'Excluído' && o.status !== 'Cancelado');
@@ -238,7 +328,7 @@ export const AdminProvider = ({ children }: { children: ReactNode }) => {
         financialsByCustomer[customerKey] = { totalComprado, totalPago, saldoDevedor };
       });
       return financialsByCustomer;
-  }, [customers, deletedCustomers, customerOrders]);
+  }, [customersForUI, deletedCustomers, customerOrders]);
 
   const financialSummary = useMemo(() => {
     let totalVendido = 0;
@@ -854,6 +944,11 @@ export const AdminProvider = ({ children }: { children: ReactNode }) => {
   };
 
   const generateCustomerCodes = useCallback(async (logAction: LogAction, user: User | null) => {
+    if (user?.role !== 'admin') {
+      toast({ title: 'Acesso negado', description: 'Apenas administradores podem executar esta operação.', variant: 'destructive' });
+      return { newCustomers: 0, updatedOrders: 0 };
+    }
+
     const { db } = getClientFirebase();
 
     const customerKeyForOrder = (o: Order) =>
@@ -872,11 +967,22 @@ export const AdminProvider = ({ children }: { children: ReactNode }) => {
       if (Number.isFinite(numeric) && numeric > maxExistingNumber) maxExistingNumber = numeric;
     });
 
+    customers.forEach((c) => {
+      const key = c.cpf ? normalizeCpf(c.cpf) : `${c.name}-${c.phone}`;
+      if (!key) return;
+      const existing = (c.code || '').trim();
+      if (!existing) return;
+      if (!codeByCustomerKey.has(key)) codeByCustomerKey.set(key, existing);
+      const numeric = Number(existing.replace(/\D/g, ''));
+      if (Number.isFinite(numeric) && numeric > maxExistingNumber) maxExistingNumber = numeric;
+    });
+
     const uniqueCustomerKeys = Array.from(
       new Set(
-        orders
-          .map((o) => customerKeyForOrder(o))
-          .filter((k) => !!k)
+        [
+          ...orders.map((o) => customerKeyForOrder(o)),
+          ...customers.map((c) => (c.cpf ? normalizeCpf(c.cpf) : `${c.name}-${c.phone}`)),
+        ].filter((k) => !!k)
       )
     );
 
@@ -900,6 +1006,16 @@ export const AdminProvider = ({ children }: { children: ReactNode }) => {
       updates.push({ orderId: o.id, code });
     });
 
+    const customerUpdates: Array<{ customerId: string; code: string }> = [];
+    customers.forEach((c) => {
+      const key = c.cpf ? normalizeCpf(c.cpf) : `${c.name}-${c.phone}`;
+      const code = key ? codeByCustomerKey.get(key) : undefined;
+      const customerId = c.cpf ? normalizeCpf(c.cpf) : undefined;
+      if (!code || !customerId) return;
+      if ((c.code || '').trim() === code) return;
+      customerUpdates.push({ customerId, code });
+    });
+
     const chunkSize = 450;
     let updatedOrders = 0;
     for (let i = 0; i < updates.length; i += chunkSize) {
@@ -912,18 +1028,29 @@ export const AdminProvider = ({ children }: { children: ReactNode }) => {
       updatedOrders += chunk.length;
     }
 
+    let updatedCustomers = 0;
+    for (let i = 0; i < customerUpdates.length; i += chunkSize) {
+      const chunk = customerUpdates.slice(i, i + chunkSize);
+      const batch = writeBatch(db);
+      chunk.forEach((u) => {
+        batch.update(doc(db, 'customers', u.customerId), { code: u.code, updatedAt: new Date().toISOString() });
+      });
+      await batch.commit();
+      updatedCustomers += chunk.length;
+    }
+
     logAction(
       'Geração de Código de Cliente',
-      `Foram gerados códigos para ${missingKeys.length} clientes e atualizados ${updatedOrders} pedidos.`,
+      `Foram gerados códigos para ${missingKeys.length} clientes, atualizados ${updatedOrders} pedidos e ${updatedCustomers} cadastros.`,
       user
     );
     toast({
       title: 'Códigos Gerados!',
-      description: `Novos clientes: ${missingKeys.length}. Pedidos atualizados: ${updatedOrders}.`,
+      description: `Novos clientes: ${missingKeys.length}. Pedidos atualizados: ${updatedOrders}. Cadastros atualizados: ${updatedCustomers}.`,
     });
 
     return { newCustomers: missingKeys.length, updatedOrders };
-  }, [orders, toast]);
+  }, [orders, customers, toast]);
 
   const updateOrderStatus = useCallback(async (orderId: string, newStatus: Order['status'], logAction: LogAction, user: User | null) => {
     const { db } = getClientFirebase();
@@ -1125,63 +1252,175 @@ export const AdminProvider = ({ children }: { children: ReactNode }) => {
 
   const updateCustomer = useCallback(async (oldCustomer: CustomerInfo, updatedCustomerData: CustomerInfo, logAction: LogAction, user: User | null) => {
     const { db } = getClientFirebase();
-    const batch = writeBatch(db);
     const oldCustomerKey = oldCustomer.cpf?.replace(/\D/g, '') || `${oldCustomer.name}-${oldCustomer.phone}`;
+    const oldCpf = normalizeCpf(oldCustomer.cpf || '');
+    const newCpf = normalizeCpf(updatedCustomerData.cpf || '');
+    if (newCpf.length !== 11) {
+      toast({ title: 'Erro', description: 'CPF inválido.', variant: 'destructive' });
+      return;
+    }
 
-    orders.forEach(order => {
-        const orderCustomerKey = order.customer.cpf?.replace(/\D/g, '') || `${order.customer.name}-${order.customer.phone}`;
-        if (orderCustomerKey === oldCustomerKey) {
-            const customerDataForOrder = { ...updatedCustomerData };
-            
-            if (updatedCustomerData.code === undefined && order.customer.code) {
-                customerDataForOrder.code = order.customer.code;
-            }
-            batch.update(doc(db, 'orders', order.id), { customer: sanitizeCustomerForFirestore(customerDataForOrder) });
-        }
+    const customerDataForWrites: CustomerInfo = {
+      ...updatedCustomerData,
+      cpf: newCpf,
+    };
+
+    const ordersToUpdate = orders.filter((order) => {
+      const orderCustomerKey = order.customer.cpf?.replace(/\D/g, '') || `${order.customer.name}-${order.customer.phone}`;
+      return orderCustomerKey === oldCustomerKey;
     });
 
-    batch.commit().then(() => {
-        logAction('Atualização de Cliente', `Dados do cliente ${updatedCustomerData.name} (CPF: ${updatedCustomerData.cpf}) foram atualizados.`, user);
-        toast({ title: "Cliente Atualizado!", description: `Os dados de ${updatedCustomerData.name} foram salvos.` });
-    }).catch(async(e) => {
-        errorEmitter.emit('permission-error', new FirestorePermissionError({
-            path: `orders`,
-            operation: 'update',
-        }));
-    });
+    const chunkSize = 450;
+    try {
+      for (let i = 0; i < ordersToUpdate.length; i += chunkSize) {
+        const chunk = ordersToUpdate.slice(i, i + chunkSize);
+        const batch = writeBatch(db);
+        chunk.forEach((order) => {
+          const customerDataForOrder = { ...customerDataForWrites };
+          if (customerDataForWrites.code === undefined && order.customer.code) {
+            customerDataForOrder.code = order.customer.code;
+          }
+          batch.update(doc(db, 'orders', order.id), { customer: sanitizeCustomerForFirestore(customerDataForOrder) });
+        });
+        await batch.commit();
+      }
+
+      if (oldCpf && oldCpf !== newCpf) {
+        const fromRef = doc(db, 'customers', oldCpf);
+        const toRef = doc(db, 'customers', newCpf);
+        const existingSnap = await getDoc(fromRef);
+        const existingData = existingSnap.exists() ? (existingSnap.data() as CustomerInfo) : oldCustomer;
+        await setDoc(toRef, {
+          ...sanitizeCustomerForFirestore({ ...existingData, ...customerDataForWrites }),
+          updatedAt: new Date().toISOString(),
+        });
+        await deleteDoc(fromRef);
+      } else {
+        await setDoc(
+          doc(db, 'customers', newCpf),
+          { ...sanitizeCustomerForFirestore(customerDataForWrites), updatedAt: new Date().toISOString() },
+          { merge: true }
+        );
+      }
+
+      logAction('Atualização de Cliente', `Dados do cliente ${customerDataForWrites.name} (CPF: ${newCpf}) foram atualizados.`, user);
+      toast({ title: "Cliente Atualizado!", description: `Os dados de ${customerDataForWrites.name} foram salvos.` });
+    } catch (e) {
+      errorEmitter.emit('permission-error', new FirestorePermissionError({ path: `customers`, operation: 'update' }));
+    }
   }, [orders, toast]);
   
   const deleteCustomer = useCallback(async (customer: CustomerInfo, logAction: LogAction, user: User | null) => {
     const { db } = getClientFirebase();
-    const customerKey = customer.cpf?.replace(/\D/g, '') || `${customer.name}-${customer.phone}`;
+    if (!canAccessCustomersTrash(user)) {
+      toast({ title: 'Acesso negado', description: 'Você não tem permissão para acessar a lixeira.', variant: 'destructive' });
+      return;
+    }
+
+    const cpf = normalizeCpf(customer.cpf || '');
+    if (cpf.length !== 11) {
+      toast({ title: 'Erro', description: 'CPF inválido.', variant: 'destructive' });
+      return;
+    }
+
+    const customerKey = cpf;
 
     const ordersToUpdate = orders.filter(order => {
         const orderCustomerKey = order.customer.cpf?.replace(/\D/g, '') || `${order.customer.name}-${order.customer.phone}`;
         return orderCustomerKey === customerKey;
     });
 
-    if (ordersToUpdate.length === 0) {
-        toast({ title: "Nenhum pedido encontrado", description: "Não há registros para este cliente.", variant: "destructive" });
-        return;
-    }
-    
-    const batch = writeBatch(db);
-    ordersToUpdate.forEach(order => {
-        batch.update(doc(db, 'orders', order.id), { status: 'Excluído' });
-    });
+    const customerRef = doc(db, 'customers', cpf);
+    const existingCustomerSnap = await getDoc(customerRef);
+    const customerToTrash = (existingCustomerSnap.exists() ? (existingCustomerSnap.data() as CustomerInfo) : customer) as CustomerInfo;
 
-    batch.commit().then(() => {
-        logAction('Exclusão de Cliente', `Cliente ${customer.name} (CPF: ${customer.cpf}) e seus ${ordersToUpdate.length} pedidos foram movidos para a lixeira.`, user);
-        toast({ title: "Cliente Excluído!", description: `O cliente ${customer.name} e todos os seus pedidos foram movidos para a lixeira.`, variant: "destructive" });
-    }).catch(async(e) => {
-        errorEmitter.emit('permission-error', new FirestorePermissionError({
-            path: 'orders',
-            operation: 'update',
-        }));
-    });
-}, [orders, toast]);
+    const now = new Date().toISOString();
+    const trashRef = doc(db, 'customersTrash', cpf);
+
+    const chunkSize = 450;
+    try {
+      let trashMoved = false;
+      for (let i = 0; i < Math.max(ordersToUpdate.length, 1); i += chunkSize) {
+        const chunk = ordersToUpdate.slice(i, i + chunkSize);
+        const batch = writeBatch(db);
+
+        if (!trashMoved) {
+          batch.set(trashRef, {
+            ...sanitizeCustomerForFirestore({ ...customerToTrash, cpf }),
+            deletedAt: now,
+            deletedBy: user?.id,
+            deletedByName: user?.name,
+          });
+          batch.delete(customerRef);
+          trashMoved = true;
+        }
+
+        chunk.forEach((order) => {
+          batch.update(doc(db, 'orders', order.id), { status: 'Excluído' });
+        });
+
+        await batch.commit();
+      }
+
+      logAction(
+        'Lixeira - Excluir Cliente',
+        `Cliente ${customerToTrash.name} (CPF: ${cpf}) movido para a lixeira. Pedidos movidos: ${ordersToUpdate.length}.`,
+        user
+      );
+      toast({
+        title: "Cliente Excluído!",
+        description: `O cliente ${customerToTrash.name} foi movido para a lixeira.`,
+        variant: "destructive",
+      });
+    } catch (e) {
+      errorEmitter.emit('permission-error', new FirestorePermissionError({ path: 'customers/customersTrash', operation: 'write' }));
+    }
+  }, [orders, toast]);
+
+  const restoreCustomerFromTrash = useCallback(async (customer: CustomerInfo, logAction: LogAction, user: User | null) => {
+    const { db } = getClientFirebase();
+    if (!canAccessCustomersTrash(user)) {
+      toast({ title: 'Acesso negado', description: 'Você não tem permissão para acessar a lixeira.', variant: 'destructive' });
+      return;
+    }
+
+    const cpf = normalizeCpf(customer.cpf || '');
+    if (cpf.length !== 11) {
+      toast({ title: 'Erro', description: 'CPF inválido.', variant: 'destructive' });
+      return;
+    }
+
+    const trashRef = doc(db, 'customersTrash', cpf);
+    const snap = await getDoc(trashRef);
+    if (!snap.exists()) {
+      toast({ title: 'Erro', description: 'Registro não encontrado na lixeira.', variant: 'destructive' });
+      return;
+    }
+
+    const restored = snap.data() as CustomerInfo;
+    const customerRef = doc(db, 'customers', cpf);
+    const now = new Date().toISOString();
+
+    // Fluxo de restauração:
+    // /customersTrash -> grava em /customers -> remove de /customersTrash -> UI restaura pedidos (se necessário).
+    try {
+      const batch = writeBatch(db);
+      batch.set(customerRef, { ...sanitizeCustomerForFirestore({ ...restored, cpf }), restoredAt: now, restoredBy: user?.id, restoredByName: user?.name, updatedAt: now });
+      batch.delete(trashRef);
+      await batch.commit();
+      logAction('Lixeira - Restaurar Cliente', `Cliente ${restored.name} (CPF: ${cpf}) foi restaurado da lixeira.`, user);
+      toast({ title: 'Cliente Restaurado!', description: `${restored.name} voltou para a lista principal.` });
+    } catch (e) {
+      errorEmitter.emit('permission-error', new FirestorePermissionError({ path: 'customers/customersTrash', operation: 'write' }));
+    }
+  }, [toast]);
 
   const importCustomers = useCallback(async (csvData: string, logAction: LogAction, user: User | null) => {
+    if (user?.role !== 'admin') {
+      toast({ title: 'Acesso negado', description: 'Apenas administradores podem executar esta operação.', variant: 'destructive' });
+      return;
+    }
+
     const { db } = getClientFirebase();
     const sanitizedCsv = csvData.trim().replace(/^\uFEFF/, ''); 
     if (!sanitizedCsv) {
@@ -1253,67 +1492,57 @@ export const AdminProvider = ({ children }: { children: ReactNode }) => {
         return;
     }
     
-    const batch = writeBatch(db);
     let updatedCount = 0;
     let createdCount = 0;
     
-    const existingCpfSet = new Set(
-        orders
-            .map(o => o.customer.cpf)
-            .filter((cpf): cpf is string => !!cpf)
-            .map(cpf => cpf.replace(/\D/g, ''))
-    );
-
+    const existingCpfSet = new Set(customers.map((c) => (c.cpf ? normalizeCpf(c.cpf) : '')));
 
     for (const importedCustomer of customersToImport) {
         const cpf = importedCustomer.cpf!.replace(/\D/g, '');
         const existingOrders = orders.filter(o => o.customer.cpf && o.customer.cpf.replace(/\D/g, '') === cpf);
 
-        if (existingOrders.length > 0) {
-            let customerAlreadyUpdated = false;
-            existingOrders.forEach(order => {
-                const updatedCustomerData = { ...order.customer, ...importedCustomer, cpf };
-                batch.update(doc(db, 'orders', order.id), { customer: updatedCustomerData });
-                if (!customerAlreadyUpdated) {
-                    updatedCount++;
-                    customerAlreadyUpdated = true;
-                }
-            });
+        const completeCustomerData: CustomerInfo = {
+          cpf,
+          name: importedCustomer.name || 'Nome não informado',
+          phone: importedCustomer.phone || '',
+          phone2: importedCustomer.phone2,
+          phone3: importedCustomer.phone3,
+          email: importedCustomer.email || '',
+          zip: importedCustomer.zip || '',
+          address: importedCustomer.address || '',
+          number: importedCustomer.number || '',
+          complement: importedCustomer.complement || '',
+          neighborhood: importedCustomer.neighborhood || '',
+          city: importedCustomer.city || '',
+          state: importedCustomer.state || '',
+          observations: importedCustomer.observations || '',
+        };
+
+        const customerRef = doc(db, 'customers', cpf);
+        await setDoc(customerRef, { ...sanitizeCustomerForFirestore(completeCustomerData), updatedAt: new Date().toISOString() }, { merge: true });
+
+        if (existingCpfSet.has(cpf)) {
+          updatedCount++;
         } else {
-            if (!existingCpfSet.has(cpf)) {
-                const orderId = `REG-${cpf}`;
-                const completeCustomerData: CustomerInfo = {
-                    cpf,
-                    name: importedCustomer.name || 'Nome não informado',
-                    phone: importedCustomer.phone || '',
-                    phone2: importedCustomer.phone2,
-                    phone3: importedCustomer.phone3,
-                    email: importedCustomer.email || '',
-                    zip: importedCustomer.zip || '',
-                    address: importedCustomer.address || '',
-                    number: importedCustomer.number || '',
-                    complement: importedCustomer.complement || '',
-                    neighborhood: importedCustomer.neighborhood || '',
-                    city: importedCustomer.city || '',
-                    state: importedCustomer.state || '',
-                    password: cpf.substring(0, 6)
-                };
-                const dummyOrder: Order = {
-                    id: orderId,
-                    customer: completeCustomerData,
-                    items: [], total: 0, installments: 0, installmentValue: 0,
-                    date: new Date().toISOString(), status: 'Excluído',
-                    paymentMethod: 'Dinheiro', installmentDetails: [],
-                };
-                batch.set(doc(db, 'orders', orderId), dummyOrder);
-                createdCount++;
-                existingCpfSet.add(cpf);
-            }
+          createdCount++;
+          existingCpfSet.add(cpf);
+        }
+
+        if (existingOrders.length > 0) {
+          const chunkSize = 450;
+          for (let i = 0; i < existingOrders.length; i += chunkSize) {
+            const chunk = existingOrders.slice(i, i + chunkSize);
+            const batch = writeBatch(db);
+            chunk.forEach((order) => {
+              const updatedCustomerData = { ...order.customer, ...completeCustomerData, cpf };
+              batch.update(doc(db, 'orders', order.id), { customer: sanitizeCustomerForFirestore(updatedCustomerData) });
+            });
+            await batch.commit();
+          }
         }
     }
 
     try {
-        await batch.commit();
         logAction('Importação de Clientes', `${createdCount} clientes criados e ${updatedCount} atualizados via CSV.`, user);
         toast({
             title: 'Importação Concluída!',
@@ -1322,11 +1551,11 @@ export const AdminProvider = ({ children }: { children: ReactNode }) => {
     } catch (e) {
         console.error("Error during batch commit for customer import", e);
         errorEmitter.emit('permission-error', new FirestorePermissionError({
-            path: 'orders',
+            path: 'customers',
             operation: 'write',
         }));
     }
-  }, [orders, toast]);
+  }, [orders, customers, toast]);
 
 
   const updateOrderDetails = useCallback(async (orderId: string, details: Partial<Order> & { resetDownPayment?: boolean }, logAction: LogAction, user: User | null) => {
@@ -1557,7 +1786,7 @@ export const AdminProvider = ({ children }: { children: ReactNode }) => {
   }, [orders, toast]);
   
   const value = useMemo(() => ({
-    addOrder, generateCustomerCodes, deleteOrder, permanentlyDeleteOrder, updateOrderStatus, recordInstallmentPayment, reversePayment, updateInstallmentDueDate, updateInstallmentAmount, updateCustomer, deleteCustomer, importCustomers, updateOrderDetails,
+    addOrder, addCustomer, generateCustomerCodes, deleteOrder, permanentlyDeleteOrder, updateOrderStatus, recordInstallmentPayment, reversePayment, updateInstallmentDueDate, updateInstallmentAmount, updateCustomer, deleteCustomer, restoreCustomerFromTrash, importCustomers, updateOrderDetails,
     addProduct, updateProduct, deleteProduct,
     addCategory, deleteCategory, updateCategoryName, addSubcategory, updateSubcategory, deleteSubcategory, moveCategory, reorderSubcategories, moveSubcategory,
     payCommissions, reverseCommissionPayment,
@@ -1570,21 +1799,21 @@ export const AdminProvider = ({ children }: { children: ReactNode }) => {
     stockAudits,
     avarias,
     chatSessions,
-    customers,
+    customers: customersForUI,
     deletedCustomers,
     customerOrders,
     customerFinancials,
     financialSummary,
     commissionSummary,
   }), [
-    addOrder, generateCustomerCodes, deleteOrder, permanentlyDeleteOrder, updateOrderStatus, recordInstallmentPayment, reversePayment, updateInstallmentDueDate, updateInstallmentAmount, updateCustomer, deleteCustomer, importCustomers, updateOrderDetails,
+    addOrder, addCustomer, generateCustomerCodes, deleteOrder, permanentlyDeleteOrder, updateOrderStatus, recordInstallmentPayment, reversePayment, updateInstallmentDueDate, updateInstallmentAmount, updateCustomer, deleteCustomer, restoreCustomerFromTrash, importCustomers, updateOrderDetails,
     addProduct, updateProduct, deleteProduct,
     addCategory, deleteCategory, updateCategoryName, addSubcategory, updateSubcategory, deleteSubcategory, moveCategory, reorderSubcategories, moveSubcategory,
     payCommissions, reverseCommissionPayment,
     restoreAdminData, resetOrders, resetProducts, resetFinancials, resetAllAdminData,
     saveStockAudit, addAvaria, updateAvaria, deleteAvaria,
     emptyTrash,
-    orders, commissionPayments, stockAudits, avarias, chatSessions, customers, deletedCustomers, customerOrders, customerFinancials, financialSummary, commissionSummary
+    orders, commissionPayments, stockAudits, avarias, chatSessions, customersForUI, deletedCustomers, customerOrders, customerFinancials, financialSummary, commissionSummary
   ]);
 
   return (

@@ -102,7 +102,7 @@ const resizeImage = (file: File, MAX_WIDTH = 1920, MAX_HEIGHT = 1080): Promise<s
 };
 
 export default function CustomersAdminPage() {
-  const { updateCustomer, recordInstallmentPayment, updateInstallmentDueDate, updateOrderDetails, reversePayment, importCustomers, addOrder, deleteCustomer, updateOrderStatus, generateCustomerCodes } = useAdmin();
+  const { updateCustomer, recordInstallmentPayment, updateInstallmentDueDate, updateOrderDetails, reversePayment, importCustomers, addCustomer, deleteCustomer, restoreCustomerFromTrash, updateOrderStatus, generateCustomerCodes } = useAdmin();
   const { customers, customerOrders, customerFinancials, deletedCustomers } = useAdminData();
   const { user, users } = useAuth();
   const { settings } = useSettings();
@@ -453,29 +453,7 @@ export default function CustomersAdminPage() {
     
     const customerSellerId = customerData.sellerId ?? user.id;
     const customerSellerName = customerData.sellerName ?? user.name;
-
-    const newCustomerOrder: Partial<Order> & { firstDueDate: Date } = {
-      customer: {
-        ...customerData,
-        sellerId: customerSellerId,
-        sellerName: customerSellerName,
-        password: customerData.cpf?.substring(0, 6),
-      },
-      items: [],
-      total: 0,
-      installments: 0,
-      installmentValue: 0,
-      date: new Date().toISOString(),
-      firstDueDate: new Date(),
-      status: 'Excluído', // It's a registration-only "order"
-      paymentMethod: 'Dinheiro',
-      installmentDetails: [],
-      sellerId: customerSellerId,
-      sellerName: customerSellerName,
-    };
-
-    await addOrder(newCustomerOrder, logAction, user);
-    toast({ title: 'Cliente Cadastrado!', description: `${customerData.name} foi adicionado(a) com sucesso.` });
+    await addCustomer({ ...customerData, sellerId: customerSellerId, sellerName: customerSellerName }, logAction, user);
     setIsAddCustomerDialogOpen(false);
   };
   
@@ -513,6 +491,7 @@ Não esqueça de enviar o comprovante!`;
   
   const handleRestoreCustomer = (customer: CustomerInfo) => {
     if (!user) return;
+    restoreCustomerFromTrash(customer, logAction, user);
     const ordersToRestore = customerOrders[getCustomerKey(customer)] || [];
     ordersToRestore.forEach(order => {
         if(order.status === 'Excluído') {
@@ -523,6 +502,8 @@ Não esqueça de enviar o comprovante!`;
   };
 
   const canDeleteCustomer = user?.role === 'admin' || user?.role === 'gerente';
+  const canAccessTrash = user?.role === 'admin' || user?.role === 'gerente';
+  const isAdmin = user?.role === 'admin';
 
   const sellers = useMemo(() => {
     return users.filter(u => u.role === 'vendedor' || u.role === 'admin' || u.role === 'gerente');
@@ -561,57 +542,63 @@ Não esqueça de enviar o comprovante!`;
                                 <UserPlus className="h-4 w-4 mr-2" />
                                 Cadastrar
                             </Button>
-                            <AlertDialog>
-                                <AlertDialogTrigger asChild>
-                                    <Button variant="outline" size="sm" disabled={isGeneratingCustomerCodes}>
-                                        <KeyRound className="h-4 w-4 mr-2" />
-                                        Gerar Códigos
-                                    </Button>
-                                </AlertDialogTrigger>
-                                <AlertDialogContent>
-                                    <AlertDialogHeader>
-                                        <AlertDialogTitle>Gerar códigos para todos os clientes?</AlertDialogTitle>
-                                        <AlertDialogDescription>
-                                            Isso vai preencher o código em todos os pedidos antigos. Pode levar alguns segundos.
-                                        </AlertDialogDescription>
-                                    </AlertDialogHeader>
-                                    <AlertDialogFooter>
-                                        <AlertDialogCancel>Cancelar</AlertDialogCancel>
-                                        <AlertDialogAction
-                                            onClick={async () => {
-                                                if (!user) return;
-                                                try {
-                                                    setIsGeneratingCustomerCodes(true);
-                                                    await generateCustomerCodes(logAction, user);
-                                                } finally {
-                                                    setIsGeneratingCustomerCodes(false);
-                                                }
-                                            }}
-                                        >
-                                            Gerar
-                                        </AlertDialogAction>
-                                    </AlertDialogFooter>
-                                </AlertDialogContent>
-                            </AlertDialog>
-                            <Button variant="outline" size="sm" onClick={() => fileInputRef.current?.click()}>
-                                <Import className="h-4 w-4 mr-2" />
-                                Importar
-                            </Button>
+                            {isAdmin && (
+                                <AlertDialog>
+                                    <AlertDialogTrigger asChild>
+                                        <Button variant="outline" size="sm" disabled={isGeneratingCustomerCodes}>
+                                            <KeyRound className="h-4 w-4 mr-2" />
+                                            Gerar Códigos
+                                        </Button>
+                                    </AlertDialogTrigger>
+                                    <AlertDialogContent>
+                                        <AlertDialogHeader>
+                                            <AlertDialogTitle>Gerar códigos para todos os clientes?</AlertDialogTitle>
+                                            <AlertDialogDescription>
+                                                Isso vai preencher o código em todos os pedidos antigos. Pode levar alguns segundos.
+                                            </AlertDialogDescription>
+                                        </AlertDialogHeader>
+                                        <AlertDialogFooter>
+                                            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+                                            <AlertDialogAction
+                                                onClick={async () => {
+                                                    if (!user) return;
+                                                    try {
+                                                        setIsGeneratingCustomerCodes(true);
+                                                        await generateCustomerCodes(logAction, user);
+                                                    } finally {
+                                                        setIsGeneratingCustomerCodes(false);
+                                                    }
+                                                }}
+                                            >
+                                                Gerar
+                                            </AlertDialogAction>
+                                        </AlertDialogFooter>
+                                    </AlertDialogContent>
+                                </AlertDialog>
+                            )}
+                            {isAdmin && (
+                                <Button variant="outline" size="sm" onClick={() => fileInputRef.current?.click()}>
+                                    <Import className="h-4 w-4 mr-2" />
+                                    Importar
+                                </Button>
+                            )}
                         </div>
-                        <input
-                            type="file"
-                            ref={fileInputRef}
-                            className="hidden"
-                            accept=".csv"
-                            onChange={handleImportCustomers}
-                        />
+                        {isAdmin && (
+                            <input
+                                type="file"
+                                ref={fileInputRef}
+                                className="hidden"
+                                accept=".csv"
+                                onChange={handleImportCustomers}
+                            />
+                        )}
                     </div>
                 </CardHeader>
                 <CardContent>
                     <Tabs value={activeTab} onValueChange={setActiveTab}>
-                        <TabsList className="grid w-full grid-cols-2">
+                        <TabsList className={cn("grid w-full", canAccessTrash ? "grid-cols-2" : "grid-cols-1")}>
                             <TabsTrigger value="active">Ativos</TabsTrigger>
-                            <TabsTrigger value="deleted">Lixeira</TabsTrigger>
+                            {canAccessTrash && <TabsTrigger value="deleted">Lixeira</TabsTrigger>}
                         </TabsList>
                         <div className="relative my-4">
                             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
@@ -660,6 +647,7 @@ Não esqueça de enviar o comprovante!`;
                                 </div>
                             )}
                         </TabsContent>
+                        {canAccessTrash && (
                         <TabsContent value="deleted">
                              {filteredDeletedCustomers.length > 0 ? (
                                 <div className="flex flex-col gap-2 max-h-[60vh] overflow-y-auto pr-2">
@@ -691,6 +679,7 @@ Não esqueça de enviar o comprovante!`;
                                 </div>
                             )}
                         </TabsContent>
+                        )}
                     </Tabs>
                 </CardContent>
             </Card>

@@ -24,9 +24,7 @@ function isValidCPF(cpf: string) {
 
 const customerSchema = z.object({
   name: z.string().min(3, 'Nome completo é obrigatório.'),
-  cpf: z.string().optional().refine(val => !val || isValidCPF(val), {
-    message: 'CPF inválido.',
-  }),
+  cpf: z.string().min(1, 'CPF é obrigatório.').refine((val) => isValidCPF(val), { message: 'CPF inválido.' }),
   phone: z.string().min(10, 'O telefone principal (WhatsApp) é obrigatório.'),
   phone2: z.string().optional(),
   phone3: z.string().optional(),
@@ -120,7 +118,7 @@ export default function CustomerForm({ onSave, onCancel, customerToEdit }: Custo
     <Form {...form}>
       <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6 py-4">
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <FormField control={form.control} name="cpf" render={({ field }) => ( <FormItem><FormLabel>CPF (Opcional)</FormLabel><FormControl><Input placeholder="000.000.000-00" {...field} /></FormControl><FormMessage /></FormItem> )} />
+            <FormField control={form.control} name="cpf" render={({ field }) => ( <FormItem><FormLabel>CPF</FormLabel><FormControl><Input placeholder="000.000.000-00" {...field} /></FormControl><FormMessage /></FormItem> )} />
             <FormField control={form.control} name="name" render={({ field }) => ( <FormItem><FormLabel>Nome Completo</FormLabel><FormControl><Input {...field} /></FormControl><FormMessage /></FormItem> )} />
             <FormField control={form.control} name="phone" render={({ field }) => ( <FormItem><FormLabel>Telefone (WhatsApp)</FormLabel><FormControl><Input placeholder="(99) 99999-9999" {...field} onChange={(e) => field.onChange(formatPhone(e.target.value))} maxLength={15} /></FormControl><FormMessage /></FormItem> )} />
             <FormField control={form.control} name="phone2" render={({ field }) => ( <FormItem><FormLabel>Telefone 2 (Opcional)</FormLabel><FormControl><Input placeholder="(99) 99999-9999" {...field} onChange={(e) => field.onChange(formatPhone(e.target.value))} maxLength={15} /></FormControl><FormMessage /></FormItem> )} />

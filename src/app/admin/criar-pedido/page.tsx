@@ -379,51 +379,55 @@ export default function CreateOrderPage() {
                 render={({ field }) => (
                   <FormItem className="flex flex-col">
                     <FormLabel>Cliente</FormLabel>
-                    <FormControl>
-                      <Button
-                        type="button"
-                        variant="outline"
-                        role="combobox"
-                        onClick={() => setOpenCustomerDialog(true)}
-                        className={cn("w-full justify-between", !field.value && "text-muted-foreground")}
-                      >
-                        {field.value
-                          ? allCustomers.find(c => (c.cpf || `${c.name}-${c.phone}`) === field.value)?.name
-                          : "Selecione um cliente"}
-                        <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
-                      </Button>
-                    </FormControl>
-                    <CommandDialog open={openCustomerDialog} onOpenChange={setOpenCustomerDialog}>
-                      <CommandInput placeholder="Buscar cliente por nome, CPF ou código..." />
-                      <CommandList>
-                        <CommandEmpty>Nenhum cliente encontrado.</CommandEmpty>
-                        <CommandGroup>
-                          {allCustomers && allCustomers.map(c => {
-                            const customerId = c.cpf || `${c.name}-${c.phone}`;
-                            return (
-                              <CommandItem
-                                key={customerId}
-                                value={`${c.code || ''} ${c.name} ${c.cpf || ''} ${c.phone || ''}`.trim()}
-                                className="cursor-pointer"
-                                onSelect={() => {
-                                  form.setValue("customerId", customerId, { shouldValidate: true });
-                                  setOpenCustomerDialog(false);
-                                }}
-                              >
-                                <Check className={cn("mr-2 h-4 w-4", customerId === field.value ? "opacity-100" : "opacity-0")} />
-                                <div className="flex flex-col items-start text-left">
-                                  <span>{c.name}</span>
-                                  <span className="text-xs text-muted-foreground">
-                                    {c.code ? `${c.code} • ` : ''}
-                                    {c.cpf || c.phone}
-                                  </span>
-                                </div>
-                              </CommandItem>
-                            );
-                          })}
-                        </CommandGroup>
-                      </CommandList>
-                    </CommandDialog>
+                    <Popover open={openCustomerDialog} onOpenChange={setOpenCustomerDialog} modal={false}>
+                      <PopoverTrigger asChild>
+                        <FormControl>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            role="combobox"
+                            className={cn("w-full justify-between", !field.value && "text-muted-foreground")}
+                          >
+                            {field.value
+                              ? allCustomers.find(c => (c.cpf || `${c.name}-${c.phone}`) === field.value)?.name
+                              : "Selecione um cliente"}
+                            <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                          </Button>
+                        </FormControl>
+                      </PopoverTrigger>
+                      <PopoverContent className="w-[350px] p-0 z-[9999] pointer-events-auto" sideOffset={4}>
+                        <Command>
+                          <CommandInput placeholder="Buscar cliente por nome, CPF ou código..." />
+                          <CommandList>
+                            <CommandEmpty>Nenhum cliente encontrado.</CommandEmpty>
+                            <CommandGroup>
+                              {allCustomers && allCustomers.map(c => {
+                                const customerId = c.cpf || `${c.name}-${c.phone}`;
+                                return (
+                                  <CommandItem
+                                    key={customerId}
+                                    value={`${c.code || ''} ${c.name} ${c.cpf || ''} ${c.phone || ''}`.trim()}
+                                    onSelect={() => {
+                                      form.setValue("customerId", customerId, { shouldValidate: true });
+                                      setOpenCustomerDialog(false);
+                                    }}
+                                  >
+                                    <Check className={cn("mr-2 h-4 w-4", customerId === field.value ? "opacity-100" : "opacity-0")} />
+                                    <div className="flex flex-col items-start text-left">
+                                      <span>{c.name}</span>
+                                      <span className="text-xs text-muted-foreground">
+                                        {c.code ? `${c.code} • ` : ''}
+                                        {c.cpf || c.phone}
+                                      </span>
+                                    </div>
+                                  </CommandItem>
+                                );
+                              })}
+                            </CommandGroup>
+                          </CommandList>
+                        </Command>
+                      </PopoverContent>
+                    </Popover>
                     <FormMessage />
                   </FormItem>
                 )}
