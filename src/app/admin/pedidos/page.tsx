@@ -693,7 +693,13 @@ Não esqueça de enviar o comprovante!`;
                                                       {nextPendingInstallment ? format(new Date(nextPendingInstallment.dueDate), 'dd/MM/yy') : '-'}
                                                   </TableCell>
                                                   <TableCell className="p-2 text-right font-semibold">{formatCurrency(order.total)}</TableCell>
-                                                  <TableCell className="p-2 text-right font-semibold text-green-600">{formatCurrency(order.commission || 0)}</TableCell>
+                                                  <TableCell className="p-2 text-right font-semibold">
+                                                    {order.status === 'Entregue' ? (
+                                                      <span className="text-green-600">{formatCurrency(order.commission || 0)}</span>
+                                                    ) : (
+                                                      <span className="text-muted-foreground">-</span>
+                                                    )}
+                                                  </TableCell>
                                                   <TableCell className="p-2 text-center">
                                                       <div className="flex flex-col items-center justify-center gap-1">
                                                           <Badge variant={getStatusVariant(order.status)}>{order.status}</Badge>
@@ -995,30 +1001,34 @@ Não esqueça de enviar o comprovante!`;
                                 </div>
                                 <Separator className="my-3" />
 
-                                 <div className="flex justify-between text-base items-center">
-                                    <span className="font-semibold text-green-600 flex items-center gap-2"><Percent />Comissão:</span>
-                                    {isManagerOrAdmin ? (
-                                      <div className="flex gap-2 items-center">
-                                        <span className="text-sm">R$</span>
-                                         <Input
-                                              type="text"
-                                              value={commissionInput}
-                                              onChange={(e) => setCommissionInput(e.target.value)}
-                                              onKeyDown={(e) => { if (e.key === 'Enter') handleUpdateCommission() }}
-                                              className="w-24 h-8 text-right"
+                                {selectedOrder.status === 'Entregue' && (
+                                  <>
+                                    <div className="flex justify-between text-base items-center">
+                                      <span className="font-semibold text-green-600 flex items-center gap-2"><Percent />Comissão:</span>
+                                      {isManagerOrAdmin ? (
+                                        <div className="flex gap-2 items-center">
+                                          <span className="text-sm">R$</span>
+                                          <Input
+                                            type="text"
+                                            value={commissionInput}
+                                            onChange={(e) => setCommissionInput(e.target.value)}
+                                            onKeyDown={(e) => { if (e.key === 'Enter') handleUpdateCommission() }}
+                                            className="w-24 h-8 text-right"
                                           />
                                           <Button size="icon" variant="outline" onClick={handleCalculateCommission} className="h-8 w-8">
-                                              <Calculator className="h-4 w-4" />
+                                            <Calculator className="h-4 w-4" />
                                           </Button>
                                           <Button size="icon" variant="outline" onClick={handleUpdateCommission} className="h-8 w-8">
-                                              <Save className="h-4 w-4" />
+                                            <Save className="h-4 w-4" />
                                           </Button>
-                                      </div>
-                                    ) : (
-                                       <span className="font-bold text-green-600">{formatCurrency(selectedOrder.commission || 0)}</span>
-                                    )}
-                                </div>
-                                {selectedOrder.isCommissionManual && <p className="text-xs text-muted-foreground text-right">Valor de comissão manual</p>}
+                                        </div>
+                                      ) : (
+                                        <span className="font-bold text-green-600">{formatCurrency(selectedOrder.commission || 0)}</span>
+                                      )}
+                                    </div>
+                                    {selectedOrder.isCommissionManual && <p className="text-xs text-muted-foreground text-right">Valor de comissão manual</p>}
+                                  </>
+                                )}
                             </CardContent>
                           </Card>
                       </div>
