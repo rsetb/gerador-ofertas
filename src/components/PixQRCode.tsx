@@ -31,8 +31,8 @@ export default function PixQRCode({ payload, size = 512, className }: PixQRCodeP
 
   return (
     <div className={cn("flex flex-col items-center gap-2 print:gap-1 p-2 print:p-1 border rounded-lg bg-muted/50", className)}>
-        <div className="flex items-center gap-2 print:gap-1 font-semibold text-sm print:text-[9px]">
-            <QrCode className="h-4 w-4 text-primary"/>
+        <div className="flex items-center gap-2 print:gap-1 print-default:gap-1 font-semibold text-sm print:text-[9px] print-default:text-[11px]">
+            <QrCode className="h-4 w-4 text-primary print-default:h-4 print-default:w-4"/>
             <span>Pague com PIX</span>
         </div>
       {qrCodeUrl ? (
