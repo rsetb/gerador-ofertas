@@ -41,6 +41,20 @@ const CarnetContent = ({ order, settings, pixPayload, productCodeById }: { order
         if (items.length === 1) return firstLabel;
         return `${firstLabel} (+${items.length - 1})`;
     }, [order.items, productCodeById]);
+    const productsShortAbbrev = useMemo(() => {
+        const text = productsShort;
+        const maxLen = 26;
+        if (!text) return '';
+        if (text.length <= maxLen) return text;
+
+        const suffixMatch = text.match(/\s\(\+\d+\)$/);
+        const suffix = suffixMatch ? suffixMatch[0] : '';
+        const base = suffix ? text.slice(0, -suffix.length) : text;
+
+        const allowedBaseLen = Math.max(0, maxLen - suffix.length);
+        const truncatedBase = base.slice(0, Math.max(0, allowedBaseLen - 1)).trimEnd();
+        return `${truncatedBase}…${suffix}`;
+    }, [productsShort]);
     const customerNameWithCode = useMemo(() => {
         const code = (order.customer.code || '').trim();
         if (!code) return order.customer.name;
@@ -143,13 +157,13 @@ const CarnetContent = ({ order, settings, pixPayload, productCodeById }: { order
         
         <div className="flex-grow mt-0.5 print:mt-0 border rounded-md overflow-hidden flex flex-col">
             <div className="overflow-y-auto print:overflow-visible">
-                <table className="carnet-installments-table w-full text-sm print:text-[11px]">
+                <table className="carnet-installments-table w-full table-fixed text-sm print:text-[11px]">
                     <thead className="bg-muted/50 print:bg-gray-100">
                         <tr className="border-b">
                             <th className="px-2 py-1 print:px-1 print:py-0.5 text-center font-semibold w-[12%]">Parc.</th>
                             <th className="px-2 py-1 print:px-1 print:py-0.5 text-left font-semibold w-[16%]">Venc.</th>
-                            <th className="px-2 py-1 print:px-1 print:py-0.5 text-left font-semibold w-[32%]">Produto</th>
-                            <th className="px-2 py-1 print:px-1 print:py-0.5 text-right font-semibold w-[18%]">Valor (R$)</th>
+                            <th className="px-2 py-1 print:px-1 print:py-0.5 text-left font-semibold w-[28%]">Produto</th>
+                            <th className="px-2 py-1 print:px-1 print:py-0.5 text-right font-semibold w-[22%]">Valor (R$)</th>
                             <th className="px-2 py-1 print:px-1 print:py-0.5 text-left font-semibold w-[22%]">Data Pag.</th>
                         </tr>
                     </thead>
@@ -158,7 +172,9 @@ const CarnetContent = ({ order, settings, pixPayload, productCodeById }: { order
                             <tr key={installment.installmentNumber} className="border-b last:border-none">
                                 <td className="px-2 py-1 print:px-1 print:py-0.5 text-center font-semibold">{installment.installmentNumber}/{order.installments}</td>
                                 <td className="px-2 py-1 print:px-1 print:py-0.5 font-semibold">{format(parseISO(installment.dueDate), 'dd/MM/yy')}</td>
-                                <td className="px-2 py-1 print:px-1 print:py-0.5 font-semibold truncate">{productsShort}</td>
+                                <td className="px-2 py-1 print:px-1 print:py-0.5 font-semibold">
+                                    <span className="block truncate">{productsShortAbbrev}</span>
+                                </td>
                                 <td className="px-2 py-1 print:px-1 print:py-0.5 text-right font-mono font-semibold">{formatCurrency(installment.amount)}</td>
                                 <td className="px-2 py-1 print:px-1 print:py-0.5 border-l">
                                     {installment.status === 'Pago' 

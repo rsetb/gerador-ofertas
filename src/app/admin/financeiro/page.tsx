@@ -7,15 +7,14 @@ import { useAdmin, useAdminData } from '@/context/AdminContext';
 import type { Order, User } from '@/lib/types';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis, Legend } from 'recharts';
+import { Bar, BarChart, CartesianGrid, ResponsiveContainer, XAxis, YAxis, Legend } from 'recharts';
 import { ChartContainer, ChartTooltipContent, ChartTooltip } from '@/components/ui/chart';
-import { DollarSign, CheckCircle, Clock, Percent, Award, FileText, TrendingUp, Eye, Printer, TrendingDown, ShoppingCart, Users as UsersIcon } from 'lucide-react';
+import { DollarSign, Clock, Percent, Award, TrendingUp, Eye, Printer, ShoppingCart, Users as UsersIcon } from 'lucide-react';
 import { format, isValid, parse, parseISO } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { useRouter } from 'next/navigation';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
-import Logo from '@/components/Logo';
 import { useSettings } from '@/context/SettingsContext';
 import { useAuth } from '@/context/AuthContext';
 import { useAudit } from '@/context/AuditContext';
@@ -258,7 +257,7 @@ export default function FinanceiroPage() {
     };
 
   const sellerPerformanceCard = (
-    <Card id="seller-performance-card">
+    <Card id="seller-performance-card" className="overflow-hidden">
       <CardHeader>
         <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
           <div>
@@ -369,88 +368,110 @@ export default function FinanceiroPage() {
   );
 
   return (
-    <div className='space-y-8'>
-      <div className="print-hidden">
+    <div className="space-y-8">
+      <div className="print-hidden space-y-6">
+        <div className="rounded-xl border bg-gradient-to-r from-primary/10 via-background to-background p-6">
+          <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+            <div className="space-y-1">
+              <h1 className="text-2xl font-semibold tracking-tight">Financeiro</h1>
+              <p className="text-sm text-muted-foreground">
+                Resumo de vendas, lucros e comissões, com relatórios para impressão.
+              </p>
+            </div>
+            {!isManager && (
+              <div className="flex flex-wrap gap-2">
+                <Button onClick={() => handlePrint('all')}>
+                  <Printer className="mr-2 h-4 w-4" />
+                  Imprimir Tudo
+                </Button>
+                <Button variant="outline" onClick={() => handlePrint('sales')}>
+                  <ShoppingCart className="mr-2 h-4 w-4" />
+                  Vendas
+                </Button>
+                <Button variant="outline" onClick={() => handlePrint('sellers')}>
+                  <UsersIcon className="mr-2 h-4 w-4" />
+                  Vendedor
+                </Button>
+                <Button variant="outline" onClick={() => handlePrint('profits')}>
+                  <TrendingUp className="mr-2 h-4 w-4" />
+                  Lucros
+                </Button>
+                <Button variant="outline" onClick={() => handlePrint('commissions')}>
+                  <Award className="mr-2 h-4 w-4" />
+                  Comissões
+                </Button>
+              </div>
+            )}
+          </div>
+        </div>
         {isManager ? (
           sellerPerformanceCard
         ) : (
           <>
-            <Card>
-              <CardHeader>
-                <CardTitle>Relatório Financeiro</CardTitle>
-                <CardDescription>Resumo de vendas, lucros e comissões. Use os botões para imprimir seções específicas.</CardDescription>
-              </CardHeader>
-              <CardContent className="flex flex-wrap gap-2">
-                <Button onClick={() => handlePrint('all')}>
-                  <Printer className="mr-2 h-4 w-4" />
-                  Imprimir Relatório Completo
-                </Button>
-                <Button variant="outline" onClick={() => handlePrint('sales')}>
-                  <ShoppingCart className="mr-2 h-4 w-4" />
-                  Apenas Vendas
-                </Button>
-                <Button variant="outline" onClick={() => handlePrint('sellers')}>
-                  <UsersIcon className="mr-2 h-4 w-4" />
-                  Vendas por Vendedor
-                </Button>
-                <Button variant="outline" onClick={() => handlePrint('profits')}>
-                  <TrendingUp className="mr-2 h-4 w-4" />
-                  Apenas Lucros
-                </Button>
-                <Button variant="outline" onClick={() => handlePrint('commissions')}>
-                  <Award className="mr-2 h-4 w-4" />
-                  Apenas Comissões
-                </Button>
-              </CardContent>
-            </Card>
-
             <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-              <Card>
-                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                  <CardTitle className="text-sm font-medium">Vendas do Mês</CardTitle>
-                  <DollarSign className="h-4 w-4 text-muted-foreground" />
+              <Card className="overflow-hidden">
+                <CardHeader className="pb-2">
+                  <div className="flex items-center gap-2">
+                    <div className="flex h-9 w-9 items-center justify-center rounded-md bg-primary/10 text-primary">
+                      <DollarSign className="h-4 w-4" />
+                    </div>
+                    <CardTitle className="text-sm font-medium">Vendas do Mês</CardTitle>
+                  </div>
                 </CardHeader>
                 <CardContent>
-                  <div className="text-2xl font-bold">{formatCurrency(financialSummary.totalVendido)}</div>
-                  <p className="text-xs text-muted-foreground">Somente pedidos do mês atual</p>
+                  <div className="text-2xl font-semibold tracking-tight">{formatCurrency(financialSummary.totalVendido)}</div>
+                  <p className="text-xs text-muted-foreground">Pedidos do mês atual</p>
                 </CardContent>
               </Card>
-              <Card>
-                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                  <CardTitle className="text-sm font-medium">Lucro Bruto</CardTitle>
-                  <TrendingUp className="h-4 w-4 text-emerald-500" />
+              <Card className="overflow-hidden">
+                <CardHeader className="pb-2">
+                  <div className="flex items-center gap-2">
+                    <div className="flex h-9 w-9 items-center justify-center rounded-md bg-emerald-500/10 text-emerald-600">
+                      <TrendingUp className="h-4 w-4" />
+                    </div>
+                    <CardTitle className="text-sm font-medium">Lucro Bruto</CardTitle>
+                  </div>
                 </CardHeader>
                 <CardContent>
-                  <div className="text-2xl font-bold">{formatCurrency(financialSummary.lucroBruto)}</div>
-                  <p className="text-xs text-muted-foreground">Receita total - Custo dos produtos</p>
+                  <div className="text-2xl font-semibold tracking-tight">{formatCurrency(financialSummary.lucroBruto)}</div>
+                  <p className="text-xs text-muted-foreground">Receita − custo</p>
                 </CardContent>
               </Card>
-              <Card>
-                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                  <CardTitle className="text-sm font-medium">Contas a Receber</CardTitle>
-                  <Clock className="h-4 w-4 text-amber-500" />
+              <Card className="overflow-hidden">
+                <CardHeader className="pb-2">
+                  <div className="flex items-center gap-2">
+                    <div className="flex h-9 w-9 items-center justify-center rounded-md bg-amber-500/10 text-amber-600">
+                      <Clock className="h-4 w-4" />
+                    </div>
+                    <CardTitle className="text-sm font-medium">Contas a Receber</CardTitle>
+                  </div>
                 </CardHeader>
                 <CardContent>
-                  <div className="text-2xl font-bold">{formatCurrency(financialSummary.totalPendente)}</div>
-                  <p className="text-xs text-muted-foreground">Soma de todas as parcelas pendentes</p>
+                  <div className="text-2xl font-semibold tracking-tight">{formatCurrency(financialSummary.totalPendente)}</div>
+                  <p className="text-xs text-muted-foreground">Parcelas pendentes</p>
                 </CardContent>
               </Card>
-              <Card>
-                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                  <CardTitle className="text-sm font-medium">Comissões a Pagar</CardTitle>
-                  <Percent className="h-4 w-4 text-blue-500" />
+              <Card className="overflow-hidden">
+                <CardHeader className="pb-2">
+                  <div className="flex items-center gap-2">
+                    <div className="flex h-9 w-9 items-center justify-center rounded-md bg-blue-500/10 text-blue-600">
+                      <Percent className="h-4 w-4" />
+                    </div>
+                    <CardTitle className="text-sm font-medium">Comissões a Pagar</CardTitle>
+                  </div>
                 </CardHeader>
                 <CardContent>
-                  <div className="text-2xl font-bold">{formatCurrency(commissionSummary.totalPendingCommission)}</div>
-                  <p className="text-xs text-muted-foreground">Soma das comissões pendentes</p>
+                  <div className="text-2xl font-semibold tracking-tight">{formatCurrency(commissionSummary.totalPendingCommission)}</div>
+                  <p className="text-xs text-muted-foreground">Pendentes</p>
                 </CardContent>
               </Card>
             </div>
 
             <div className="grid gap-8 md:grid-cols-2">
-              <Card>
-                <CardHeader>
+              <Card className="overflow-hidden">
+                <CardHeader className="space-y-1">
                   <CardTitle>Vendas Mensais</CardTitle>
+                  <CardDescription>Histórico dos totais vendidos por mês.</CardDescription>
                 </CardHeader>
                 <CardContent className="pl-2">
                   <ChartContainer config={chartConfig} className="h-[350px] w-full">
@@ -485,12 +506,10 @@ export default function FinanceiroPage() {
               </Card>
               {sellerPerformanceCard}
             </div>
-            <Card>
-              <CardHeader>
-                <div>
-                  <CardTitle className="flex items-center gap-2"><Award className="h-5 w-5" /> Comissões a Pagar</CardTitle>
-                  <CardDescription>Total de comissões pendentes para cada vendedor (apenas de pedidos entregues).</CardDescription>
-                </div>
+            <Card className="overflow-hidden">
+              <CardHeader className="space-y-1">
+                <CardTitle className="flex items-center gap-2"><Award className="h-5 w-5" /> Comissões a Pagar</CardTitle>
+                <CardDescription>Total pendente por vendedor (somente pedidos entregues).</CardDescription>
               </CardHeader>
               <CardContent>
                 <div className="rounded-md border">
