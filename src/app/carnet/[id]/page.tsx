@@ -23,6 +23,19 @@ const formatCurrency = (value: number) => {
   return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(value);
 };
 
+const abbreviateProductsText = (text: string, maxLen: number) => {
+  if (!text) return '';
+  if (text.length <= maxLen) return text;
+
+  const suffixMatch = text.match(/\s\(\+\d+\)$/);
+  const suffix = suffixMatch ? suffixMatch[0] : '';
+  const base = suffix ? text.slice(0, -suffix.length) : text;
+
+  const allowedBaseLen = Math.max(0, maxLen - suffix.length);
+  const truncatedBase = base.slice(0, Math.max(0, allowedBaseLen - 1)).trimEnd();
+  return `${truncatedBase}…${suffix}`;
+};
+
 const initialSettings: StoreSettings = {
     storeName: 'ADC Móveis', storeCity: '', storeAddress: '', pixKey: '', storePhone: ''
 };
@@ -42,18 +55,10 @@ const CarnetContent = ({ order, settings, pixPayload, productCodeById }: { order
         return `${firstLabel} (+${items.length - 1})`;
     }, [order.items, productCodeById]);
     const productsShortAbbrev = useMemo(() => {
-        const text = productsShort;
-        const maxLen = 26;
-        if (!text) return '';
-        if (text.length <= maxLen) return text;
-
-        const suffixMatch = text.match(/\s\(\+\d+\)$/);
-        const suffix = suffixMatch ? suffixMatch[0] : '';
-        const base = suffix ? text.slice(0, -suffix.length) : text;
-
-        const allowedBaseLen = Math.max(0, maxLen - suffix.length);
-        const truncatedBase = base.slice(0, Math.max(0, allowedBaseLen - 1)).trimEnd();
-        return `${truncatedBase}…${suffix}`;
+        return abbreviateProductsText(productsShort, 26);
+    }, [productsShort]);
+    const productsHeaderAbbrev = useMemo(() => {
+        return abbreviateProductsText(productsShort, 120);
     }, [productsShort]);
     const customerNameWithCode = useMemo(() => {
         const code = (order.customer.code || '').trim();
@@ -131,7 +136,7 @@ const CarnetContent = ({ order, settings, pixPayload, productCodeById }: { order
                 <p className="carnet-label text-[9px] text-muted-foreground mt-0 print:mt-0">DATA DA COMPRA</p>
                 <p className="carnet-customer-value font-semibold">{format(new Date(order.date), 'dd/MM/yyyy', { locale: ptBR })}</p>
             </div>
-             <div className="sm:col-span-1 sm:row-span-2 flex items-start justify-end">
+             <div className="sm:col-span-1 sm:col-start-3 sm:row-start-1 sm:row-span-3 flex items-start justify-end">
                 {pixPayload && (
                     <div className="w-full flex flex-col items-end gap-1">
                         <div className="carnet-qr w-full max-w-[180px] flex-shrink-0">
@@ -152,6 +157,12 @@ const CarnetContent = ({ order, settings, pixPayload, productCodeById }: { order
                         )}
                     </div>
                 )}
+            </div>
+            <div className="sm:col-span-2 sm:row-start-3 space-y-0.5">
+                <p className="carnet-label text-[9px] text-muted-foreground">PRODUTO(S)</p>
+                <p className="carnet-products-value font-semibold text-xs print:text-[10px] leading-tight whitespace-normal break-words">
+                    {productsHeaderAbbrev}
+                </p>
             </div>
         </div>
         
