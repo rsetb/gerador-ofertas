@@ -600,6 +600,7 @@ export default function ConfiguracaoPage() {
   }
 
   const handlePermissionChange = (role: UserRole, section: AppSection, checked: boolean) => {
+    if (role === 'vendedor_externo') return;
     setLocalPermissions(prev => {
         if (!prev) return null;
         let updatedPermissions = { ...prev };
@@ -622,7 +623,10 @@ export default function ConfiguracaoPage() {
 
   const handleSavePermissions = () => {
       if (localPermissions) {
-          updatePermissions(localPermissions);
+          updatePermissions({
+            ...localPermissions,
+            vendedor_externo: ['minhas-comissoes'],
+          });
       }
   };
 
@@ -839,13 +843,13 @@ export default function ConfiguracaoPage() {
               Permissões de Acesso
             </CardTitle>
             <CardDescription>
-              Defina quais seções cada perfil de usuário pode acessar no painel administrativo. A hierarquia é Vendedor {'<'} Gerente {'<'} Admin.
+              Defina quais seções cada perfil de usuário pode acessar no painel administrativo. A hierarquia é Vendedor Externo {'<'} Vendedor {'<'} Gerente {'<'} Admin.
             </CardDescription>
           </CardHeader>
           <CardContent>
               {localPermissions ? (
                   <div className="space-y-6">
-                      <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
+                      <div className="grid grid-cols-1 md:grid-cols-4 gap-8">
                           <div>
                               <h3 className="font-semibold mb-4 capitalize">Vendedor</h3>
                               <div className="space-y-3">
@@ -858,6 +862,27 @@ export default function ConfiguracaoPage() {
                                           />
                                           <label
                                               htmlFor={`vendedor-${section.id}`}
+                                              className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70"
+                                          >
+                                              {section.label}
+                                          </label>
+                                      </div>
+                                  ))}
+                              </div>
+                          </div>
+
+                          <div>
+                              <h3 className="font-semibold mb-4 capitalize">Vendedor Externo</h3>
+                              <div className="space-y-3">
+                                  {ALL_SECTIONS.map(section => (
+                                      <div key={`vendedor_externo-${section.id}`} className="flex items-center space-x-2">
+                                          <Checkbox
+                                              id={`vendedor_externo-${section.id}`}
+                                              checked={section.id === 'minhas-comissoes'}
+                                              disabled
+                                          />
+                                          <label
+                                              htmlFor={`vendedor_externo-${section.id}`}
                                               className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70"
                                           >
                                               {section.label}

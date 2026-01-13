@@ -138,7 +138,7 @@ export type CommissionPayment = {
     orderIds: string[];
 };
 
-export type UserRole = 'admin' | 'gerente' | 'vendedor';
+export type UserRole = 'admin' | 'gerente' | 'vendedor' | 'vendedor_externo';
 
 export type OrderCreatorRole = UserRole | 'cliente';
 

@@ -28,6 +28,15 @@ export default function MyCommissionsPage() {
   const { logAction } = useAudit();
 
   const isAdmin = user?.role === 'admin';
+  const currentMonthKey = format(new Date(), 'yyyy-MM');
+
+  const getMonthKey = (isoDate: string) => {
+    try {
+      return format(parseISO(isoDate), 'yyyy-MM');
+    } catch {
+      return null;
+    }
+  };
   
   const pendingCommissions = useMemo(() => {
     if (!user || !orders) return [];
@@ -35,11 +44,16 @@ export default function MyCommissionsPage() {
     let userOrders = orders.filter(o => {
       const isPending = o.status === 'Entregue' && typeof o.commission === 'number' && o.commission > 0 && !o.commissionPaid;
       if (!isPending) return false;
+      if (getMonthKey(o.date) !== currentMonthKey) return false;
       if (isAdmin) return true;
       return o.sellerId === user.id;
     });
-    return userOrders;
-  }, [orders, user, isAdmin]);
+    return userOrders.sort((a, b) => {
+      const aTime = parseISO(a.date).getTime();
+      const bTime = parseISO(b.date).getTime();
+      return bTime - aTime;
+    });
+  }, [orders, user, isAdmin, currentMonthKey]);
 
   const totalPending = pendingCommissions.reduce((acc, order) => acc + (order.commission || 0), 0);
 
@@ -47,8 +61,40 @@ export default function MyCommissionsPage() {
     if (!user || !commissionPayments) return [];
     return commissionPayments
       .filter(p => p.sellerId === user.id)
+      .filter(p => getMonthKey(p.paymentDate) === currentMonthKey)
       .sort((a,b) => parseISO(b.paymentDate).getTime() - parseISO(a.paymentDate).getTime());
-  }, [commissionPayments, user]);
+  }, [commissionPayments, user, currentMonthKey]);
+
+  const paidTotal = myPaidCommissions.reduce((acc, p) => acc + p.amount, 0);
+
+  const commissionsBySellerThisMonth = useMemo(() => {
+    if (!isAdmin) return [];
+    const bySeller = new Map<string, { id: string; name: string; total: number; count: number }>();
+    pendingCommissions.forEach((order) => {
+      const sellerId = order.sellerId || 'unknown';
+      const sellerName = order.sellerName || 'Vendedor Desconhecido';
+      const current = bySeller.get(sellerId) || { id: sellerId, name: sellerName, total: 0, count: 0 };
+      current.total += order.commission || 0;
+      current.count += 1;
+      bySeller.set(sellerId, current);
+    });
+    return Array.from(bySeller.values())
+      .filter((s) => s.count > 0)
+      .sort((a, b) => b.total - a.total);
+  }, [isAdmin, pendingCommissions]);
+
+  const allPaymentsThisMonth = useMemo(() => {
+    if (!commissionPayments) return [];
+    return commissionPayments
+      .filter((p) => getMonthKey(p.paymentDate) === currentMonthKey)
+      .sort((a, b) => parseISO(b.paymentDate).getTime() - parseISO(a.paymentDate).getTime());
+  }, [commissionPayments, currentMonthKey]);
+
+  const paidTotalForCards = isAdmin
+    ? allPaymentsThisMonth.reduce((acc, p) => acc + p.amount, 0)
+    : paidTotal;
+
+  const paidCountForCards = isAdmin ? allPaymentsThisMonth.length : myPaidCommissions.length;
 
 
   if (!user) {
@@ -72,22 +118,22 @@ export default function MyCommissionsPage() {
             <div className="grid gap-4 md:grid-cols-2 mb-8">
                 <Card className="bg-amber-500/10 border-amber-500/20">
                     <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                        <CardTitle className="text-sm font-medium">Saldo a Receber</CardTitle>
+                        <CardTitle className="text-sm font-medium">{isAdmin ? 'Comissão Pendente (Equipe)' : 'Saldo a Receber'}</CardTitle>
                         <DollarSign className="h-4 w-4 text-amber-600" />
                     </CardHeader>
                     <CardContent>
                         <div className="text-2xl font-bold text-amber-600">{formatCurrency(totalPending)}</div>
-                        <p className="text-xs text-muted-foreground">Comissões de {pendingCommissions.length} vendas entregues.</p>
+                        <p className="text-xs text-muted-foreground">{isAdmin ? `Comissões pendentes de ${pendingCommissions.length} vendas (mês atual).` : `Comissões de ${pendingCommissions.length} vendas entregues.`}</p>
                     </CardContent>
                 </Card>
                 <Card className="bg-green-500/10 border-green-500/20">
                     <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                        <CardTitle className="text-sm font-medium">Total Já Recebido</CardTitle>
+                        <CardTitle className="text-sm font-medium">{isAdmin ? 'Comissão Paga no Mês (Equipe)' : 'Total Já Recebido'}</CardTitle>
                         <PiggyBank className="h-4 w-4 text-green-600" />
                     </CardHeader>
                     <CardContent>
-                        <div className="text-2xl font-bold text-green-600">{formatCurrency(myPaidCommissions.reduce((acc, p) => acc + p.amount, 0))}</div>
-                        <p className="text-xs text-muted-foreground">Total de {myPaidCommissions.length} pagamentos recebidos.</p>
+                        <div className="text-2xl font-bold text-green-600">{formatCurrency(paidTotalForCards)}</div>
+                        <p className="text-xs text-muted-foreground">Total de {paidCountForCards} pagamentos no mês.</p>
                     </CardContent>
                 </Card>
             </div>
@@ -146,7 +192,7 @@ export default function MyCommissionsPage() {
                         <Card>
                             <CardHeader>
                                 <CardTitle>Comissões Pendentes por Vendedor</CardTitle>
-                                <CardDescription>Total de comissão pendente e quantidade de vendas por vendedor.</CardDescription>
+                                <CardDescription>Total de comissão pendente e quantidade de vendas por vendedor (mês atual).</CardDescription>
                             </CardHeader>
                             <CardContent>
                                 <div className="rounded-md border">
@@ -159,8 +205,8 @@ export default function MyCommissionsPage() {
                                             </TableRow>
                                         </TableHeader>
                                         <TableBody>
-                                            {(commissionSummary?.commissionsBySeller?.length ?? 0) > 0 ? (
-                                                commissionSummary.commissionsBySeller.map((seller) => (
+                                            {commissionsBySellerThisMonth.length > 0 ? (
+                                                commissionsBySellerThisMonth.map((seller) => (
                                                     <TableRow key={seller.id}>
                                                         <TableCell className="font-medium">{seller.name}</TableCell>
                                                         <TableCell className="text-center">{seller.count}</TableCell>
@@ -183,7 +229,7 @@ export default function MyCommissionsPage() {
                      <Card>
                         <CardHeader>
                             <CardTitle>Meus Pagamentos Recebidos</CardTitle>
-                             <CardDescription>Histórico de todos os pagamentos de comissão que você já recebeu.</CardDescription>
+                             <CardDescription>Pagamentos de comissão recebidos no mês atual.</CardDescription>
                         </CardHeader>
                         <CardContent>
                              <div className="rounded-md border">
@@ -241,7 +287,7 @@ export default function MyCommissionsPage() {
                                             ))
                                         ) : (
                                             <TableRow>
-                                                <TableCell colSpan={4} className="h-24 text-center">Nenhum pagamento recebido ainda.</TableCell>
+                                                <TableCell colSpan={4} className="h-24 text-center">Nenhum pagamento recebido neste mês.</TableCell>
                                             </TableRow>
                                         )}
                                     </TableBody>
@@ -255,7 +301,7 @@ export default function MyCommissionsPage() {
                         <Card>
                             <CardHeader>
                                 <CardTitle>Histórico Geral de Pagamentos</CardTitle>
-                                <CardDescription>Histórico de todos os pagamentos de comissão para todos os vendedores.</CardDescription>
+                                <CardDescription>Pagamentos de comissão de todos os vendedores no mês atual.</CardDescription>
                             </CardHeader>
                             <CardContent>
                                 <div className="rounded-md border">
@@ -270,8 +316,8 @@ export default function MyCommissionsPage() {
                                             </TableRow>
                                         </TableHeader>
                                         <TableBody>
-                                            {commissionPayments && commissionPayments.length > 0 ? (
-                                                commissionPayments.sort((a,b) => parseISO(b.paymentDate).getTime() - parseISO(a.paymentDate).getTime()).map(payment => (
+                                            {allPaymentsThisMonth.length > 0 ? (
+                                                allPaymentsThisMonth.map(payment => (
                                                     <TableRow key={payment.id}>
                                                         <TableCell>{format(parseISO(payment.paymentDate), "dd/MM/yyyy")}</TableCell>
                                                         <TableCell>{payment.sellerName}</TableCell>

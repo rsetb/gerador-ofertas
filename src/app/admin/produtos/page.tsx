@@ -2,7 +2,7 @@
 
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import Image from 'next/image';
 import { useAdmin } from '@/context/AdminContext';
 import { useData } from '@/context/DataContext';
@@ -10,7 +10,7 @@ import type { Product } from '@/lib/types';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { MoreHorizontal, PlusCircle, Trash, Edit, PackageSearch, Eye, EyeOff, Search } from 'lucide-react';
+import { MoreHorizontal, PlusCircle, Trash, Edit, PackageSearch, Eye, EyeOff, Search, Import, History } from 'lucide-react';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -24,24 +24,41 @@ import {
   DialogTitle,
   DialogDescription,
 } from '@/components/ui/dialog';
+import {
+    AlertDialog,
+    AlertDialogAction,
+    AlertDialogCancel,
+    AlertDialogContent,
+    AlertDialogDescription,
+    AlertDialogFooter,
+    AlertDialogHeader,
+    AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 import ProductForm from '@/components/ProductForm';
 import { useAuth } from '@/context/AuthContext';
 import { useAudit } from '@/context/AuditContext';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
+import { useToast } from '@/hooks/use-toast';
 
 const formatCurrency = (value: number) => {
   return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(value);
 };
 
 export default function ManageProductsPage() {
-    const { deleteProduct } = useAdmin();
+    const { deleteProduct, importProducts } = useAdmin();
     const { products } = useData();
     const [isDialogOpen, setIsDialogOpen] = useState(false);
     const [productToEdit, setProductToEdit] = useState<Product | null>(null);
+    const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
+    const [productToDelete, setProductToDelete] = useState<Product | null>(null);
     const { user } = useAuth();
     const { logAction } = useAudit();
+    const { toast } = useToast();
     const [search, setSearch] = useState('');
+    const importInputRef = useRef<HTMLInputElement | null>(null);
+    const canDelete = user?.role === 'admin' || user?.role === 'gerente';
+    const canImport = user?.role === 'admin';
 
     const handleAddNew = () => {
         setProductToEdit(null);
@@ -53,9 +70,64 @@ export default function ManageProductsPage() {
         setIsDialogOpen(true);
     };
     
-    const handleDelete = (productId: string) => {
-        deleteProduct(productId, logAction, user);
-    }
+    const requestDelete = (product: Product) => {
+        setProductToDelete(product);
+        setIsDeleteDialogOpen(true);
+    };
+
+    const confirmDelete = () => {
+        if (!productToDelete) return;
+        deleteProduct(productToDelete.id, logAction, user);
+        setIsDeleteDialogOpen(false);
+        setProductToDelete(null);
+    };
+
+    const handleRestoreFromCache = async () => {
+        if (!user || !canImport) return;
+
+        try {
+            const raw = localStorage.getItem('productsCache');
+            if (!raw) {
+                toast({ title: 'Cache vazio', description: 'Nenhum produto foi encontrado no cache deste navegador.', variant: 'destructive' });
+                return;
+            }
+            const parsed = JSON.parse(raw);
+            if (!Array.isArray(parsed) || parsed.length === 0) {
+                toast({ title: 'Cache vazio', description: 'Nenhum produto foi encontrado no cache deste navegador.', variant: 'destructive' });
+                return;
+            }
+            await importProducts(parsed as Product[], logAction, user);
+        } catch {
+            toast({ title: 'Erro ao restaurar', description: 'Falha ao ler o cache local.', variant: 'destructive' });
+        }
+    };
+
+    const handleImportProductsFile = (event: React.ChangeEvent<HTMLInputElement>) => {
+        if (!user || !canImport) return;
+        const file = event.target.files?.[0];
+        if (!file) return;
+
+        const reader = new FileReader();
+        reader.onload = async (e) => {
+            try {
+                const text = e.target?.result as string;
+                const parsed = JSON.parse(text);
+                const productsToImport = Array.isArray(parsed) ? parsed : parsed?.products;
+
+                if (!Array.isArray(productsToImport)) {
+                    toast({ title: 'Formato inválido', description: 'Use um JSON com uma lista de produtos ou um backup com a chave "products".', variant: 'destructive' });
+                    return;
+                }
+
+                await importProducts(productsToImport as Product[], logAction, user);
+            } catch {
+                toast({ title: 'Erro ao importar', description: 'Não foi possível ler o JSON.', variant: 'destructive' });
+            } finally {
+                if (importInputRef.current) importInputRef.current.value = '';
+            }
+        };
+        reader.readAsText(file);
+    };
 
     const filteredProducts = useMemo(() => {
         const q = search.trim().toLowerCase();
@@ -83,10 +155,31 @@ export default function ManageProductsPage() {
                         <CardTitle>Gerenciar Produtos</CardTitle>
                         <CardDescription>Adicione, edite ou remova produtos do seu catálogo.</CardDescription>
                     </div>
-                    <Button onClick={handleAddNew}>
-                        <PlusCircle className="mr-2 h-4 w-4" />
-                        Adicionar Produto
-                    </Button>
+                    <div className="flex items-center gap-2">
+                        {products.length === 0 && (
+                            <>
+                                <Button variant="outline" onClick={handleRestoreFromCache} disabled={!canImport}>
+                                    <History className="mr-2 h-4 w-4" />
+                                    Restaurar do cache
+                                </Button>
+                                <Button variant="outline" onClick={() => importInputRef.current?.click()} disabled={!canImport}>
+                                    <Import className="mr-2 h-4 w-4" />
+                                    Importar JSON
+                                </Button>
+                                <input
+                                    ref={importInputRef}
+                                    type="file"
+                                    accept="application/json"
+                                    className="hidden"
+                                    onChange={handleImportProductsFile}
+                                />
+                            </>
+                        )}
+                        <Button onClick={handleAddNew}>
+                            <PlusCircle className="mr-2 h-4 w-4" />
+                            Adicionar Produto
+                        </Button>
+                    </div>
                 </CardHeader>
                 <CardContent>
                     <div className="mb-4">
@@ -160,7 +253,11 @@ export default function ManageProductsPage() {
                                                             </Button>
                                                         </DropdownMenuTrigger>
                                                         <DropdownMenuContent align="end">
-                                                            <DropdownMenuItem className="text-destructive focus:text-destructive focus:bg-destructive/10" onClick={() => handleDelete(product.id)}>
+                                                            <DropdownMenuItem
+                                                                className="text-destructive focus:text-destructive focus:bg-destructive/10"
+                                                                disabled={!canDelete}
+                                                                onClick={() => requestDelete(product)}
+                                                            >
                                                                 <Trash className="mr-2 h-4 w-4" />
                                                                 Excluir
                                                             </DropdownMenuItem>
@@ -177,7 +274,9 @@ export default function ManageProductsPage() {
                         <div className="text-center py-16 text-muted-foreground border-2 border-dashed rounded-lg">
                             <PackageSearch className="mx-auto h-12 w-12" />
                             <h3 className="mt-4 text-lg font-semibold">Nenhum produto encontrado</h3>
-                            <p className="mt-1 text-sm">Ajuste a busca ou adicione um novo produto.</p>
+                            <p className="mt-1 text-sm">
+                                {products.length === 0 ? 'Importe/restaure os produtos ou adicione um novo produto.' : 'Ajuste a busca ou adicione um novo produto.'}
+                            </p>
                         </div>
                     )}
                 </CardContent>
@@ -197,6 +296,21 @@ export default function ManageProductsPage() {
                     />
                 </DialogContent>
             </Dialog>
+
+            <AlertDialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>
+                <AlertDialogContent>
+                    <AlertDialogHeader>
+                        <AlertDialogTitle>Excluir produto?</AlertDialogTitle>
+                        <AlertDialogDescription>
+                            {productToDelete ? `Você está prestes a excluir "${productToDelete.name}".` : 'Você está prestes a excluir este produto.'}
+                        </AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <AlertDialogFooter>
+                        <AlertDialogCancel onClick={() => setProductToDelete(null)}>Cancelar</AlertDialogCancel>
+                        <AlertDialogAction onClick={confirmDelete}>Excluir</AlertDialogAction>
+                    </AlertDialogFooter>
+                </AlertDialogContent>
+            </AlertDialog>
         </>
     );
 }

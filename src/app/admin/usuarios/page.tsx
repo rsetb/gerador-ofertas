@@ -24,7 +24,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 const userEditFormSchema = z.object({
     name: z.string().min(3, 'O nome é obrigatório.'),
     username: z.string().min(3, 'O nome de usuário é obrigatório.'),
-    role: z.enum(['admin', 'gerente', 'vendedor'], { required_error: 'O perfil é obrigatório.' }),
+    role: z.enum(['admin', 'gerente', 'vendedor', 'vendedor_externo'], { required_error: 'O perfil é obrigatório.' }),
     password: z.string().optional(),
     confirmPassword: z.string().optional(),
   }).refine(data => {
@@ -43,7 +43,7 @@ const userEditFormSchema = z.object({
 const userCreateFormSchema = z.object({
     name: z.string().min(3, 'O nome é obrigatório.'),
     username: z.string().min(3, 'O nome de usuário é obrigatório.'),
-    role: z.enum(['admin', 'gerente', 'vendedor'], { required_error: 'O perfil é obrigatório.' }),
+    role: z.enum(['admin', 'gerente', 'vendedor', 'vendedor_externo'], { required_error: 'O perfil é obrigatório.' }),
     password: z.string().min(6, 'A senha deve ter pelo menos 6 caracteres.'),
     confirmPassword: z.string(),
 }).refine(data => data.password === data.confirmPassword, {
@@ -75,6 +75,21 @@ export default function ManageUsersPage() {
             role: 'vendedor',
         }
     });
+
+    const getRoleLabel = (role: UserRole) => {
+        switch (role) {
+            case 'admin':
+                return 'Admin';
+            case 'gerente':
+                return 'Gerente';
+            case 'vendedor':
+                return 'Vendedor';
+            case 'vendedor_externo':
+                return 'Vendedor Externo';
+            default:
+                return role;
+        }
+    };
 
     const handleOpenEditDialog = (user: User) => {
         setUserToEdit(user);
@@ -154,7 +169,7 @@ export default function ManageUsersPage() {
                                         <TableCell className="font-medium">{user.name}</TableCell>
                                         <TableCell>{user.username}</TableCell>
                                         <TableCell>
-                                            <Badge variant="secondary" className="capitalize">{user.role}</Badge>
+                                            <Badge variant="secondary">{getRoleLabel(user.role)}</Badge>
                                         </TableCell>
                                         <TableCell className="text-right">
                                             <div className="flex gap-2 justify-end">
@@ -328,6 +343,7 @@ export default function ManageUsersPage() {
                                             </FormControl>
                                             <SelectContent>
                                                 <SelectItem value="vendedor">Vendedor</SelectItem>
+                                                <SelectItem value="vendedor_externo">Vendedor Externo</SelectItem>
                                                 <SelectItem value="gerente">Gerente</SelectItem>
                                                 <SelectItem value="admin">Admin</SelectItem>
                                             </SelectContent>

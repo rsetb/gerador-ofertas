@@ -33,7 +33,8 @@ export const PermissionsProvider = ({ children }: { children: ReactNode }) => {
         const permissionsRef = doc(db, 'config', 'rolePermissions');
         const unsubscribe = onSnapshot(permissionsRef, async (docSnap) => {
             if (docSnap.exists()) {
-                setPermissions(docSnap.data() as RolePermissions);
+                const stored = docSnap.data() as Partial<RolePermissions>;
+                setPermissions({ ...initialPermissions, ...(stored as any) });
             } else {
                 await setDoc(permissionsRef, initialPermissions);
                 setPermissions(initialPermissions);

@@ -24,6 +24,9 @@ export const initialPermissions: RolePermissions = {
         'minhas-comissoes',
         'avarias',
     ],
+    vendedor_externo: [
+        'minhas-comissoes',
+    ],
     gerente: [
         'pedidos',
         'criar-pedido',
@@ -53,6 +56,7 @@ export const initialPermissions: RolePermissions = {
 
 
 export function hasAccess(role: UserRole, section: AppSection, permissions: RolePermissions): boolean {
+    if (role === 'vendedor_externo') return section === 'minhas-comissoes';
     if (role === 'admin') return true; // Admin always has access
     if (role === 'gerente' && section === 'financeiro') return true;
     if (role === 'vendedor' && section === 'produtos') return true;

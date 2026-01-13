@@ -119,6 +119,7 @@ interface AdminContextType {
   addProduct: (productData: Omit<Product, 'id' | 'data-ai-hint' | 'createdAt'>, logAction: LogAction, user: User | null) => Promise<void>;
   updateProduct: (product: Product, logAction: LogAction, user: User | null) => Promise<void>;
   deleteProduct: (productId: string, logAction: LogAction, user: User | null) => Promise<void>;
+  importProducts: (productsToImport: Product[], logAction: LogAction, user: User | null) => Promise<void>;
   addCategory: (categoryName: string, logAction: LogAction, user: User | null) => Promise<void>;
   deleteCategory: (categoryId: string, logAction: LogAction, user: User | null) => Promise<void>;
   updateCategoryName: (categoryId: string, newName: string, logAction: LogAction, user: User | null) => Promise<void>;
@@ -160,6 +161,14 @@ export const AdminProvider = ({ children }: { children: ReactNode }) => {
   const { products, categories } = useData();
   const { toast } = useToast();
   const { user, users } = useAuth();
+
+  const allowEmptyProductsFor = useCallback((ms: number) => {
+    if (typeof window === 'undefined') return;
+    try {
+      localStorage.setItem('allowEmptyProductsUntil', String(Date.now() + ms));
+    } catch {
+    }
+  }, []);
 
   // Admin data states, now managed here
   const [orders, setOrders] = useState<Order[]>([]);
@@ -331,6 +340,7 @@ export const AdminProvider = ({ children }: { children: ReactNode }) => {
   }, [customersForUI, deletedCustomers, customerOrders]);
 
   const financialSummary = useMemo(() => {
+    const currentMonthKey = format(new Date(), 'yyyy-MM');
     let totalVendido = 0;
     let totalRecebido = 0;
     let totalPendente = 0;
@@ -338,8 +348,28 @@ export const AdminProvider = ({ children }: { children: ReactNode }) => {
     const monthlySales: { [key: string]: number } = {};
 
     orders.forEach(order => {
-      if (order.status !== 'Cancelado' && order.status !== 'Excluído') {
-        totalVendido += order.total;
+      if (order.status === 'Cancelado' || order.status === 'Excluído') {
+        return;
+      }
+
+      let orderDate: Date;
+      try {
+        orderDate = parseISO(order.date);
+      } catch {
+        return;
+      }
+
+      const monthKey = format(orderDate, 'MMM/yy', { locale: ptBR });
+      if (!monthlySales[monthKey]) {
+        monthlySales[monthKey] = 0;
+      }
+      monthlySales[monthKey] += order.total;
+
+      if (format(orderDate, 'yyyy-MM') !== currentMonthKey) {
+        return;
+      }
+
+      totalVendido += order.total;
 
         order.items.forEach(item => {
             const product = products.find(p => p.id === item.id);
@@ -348,12 +378,6 @@ export const AdminProvider = ({ children }: { children: ReactNode }) => {
             const itemCost = cost * item.quantity;
             lucroBruto += (itemRevenue - itemCost);
         });
-
-        const monthKey = format(parseISO(order.date), 'MMM/yy', { locale: ptBR });
-        if (!monthlySales[monthKey]) {
-          monthlySales[monthKey] = 0;
-        }
-        monthlySales[monthKey] += order.total;
 
         if (order.paymentMethod === 'Crediário') {
             (order.installmentDetails || []).forEach(inst => {
@@ -367,7 +391,6 @@ export const AdminProvider = ({ children }: { children: ReactNode }) => {
         } else {
             totalRecebido += order.total;
         }
-      }
     });
     
     const monthlyData = Object.entries(monthlySales).map(([name, total]) => ({ name, total })).reverse();
@@ -403,6 +426,7 @@ export const AdminProvider = ({ children }: { children: ReactNode }) => {
   const restoreAdminData = useCallback(async (data: { products: Product[], orders: Order[], categories: Category[], commissionPayments?: CommissionPayment[], stockAudits?: StockAudit[], avarias?: Avaria[], chatSessions?: ChatSession[], customers?: CustomerInfo[], customersTrash?: CustomerInfo[] }, logAction: LogAction, user: User | null) => {
     const { db } = getClientFirebase();
     const BATCH_LIMIT = 400;
+    allowEmptyProductsFor(60_000);
 
     const processCollectionInBatches = async (collectionName: string, dataArray: any[], currentData: any[]) => {
         // Step 1: Delete all existing documents in the collection
@@ -509,7 +533,7 @@ export const AdminProvider = ({ children }: { children: ReactNode }) => {
             operation: 'write',
         });
     }
-  }, [products, orders, categories, commissionPayments, stockAudits, avarias, chatSessions, toast]);
+  }, [products, orders, categories, commissionPayments, stockAudits, avarias, chatSessions, toast, allowEmptyProductsFor]);
 
 
   const resetOrders = useCallback(async (logAction: LogAction, user: User | null) => {
@@ -531,6 +555,7 @@ export const AdminProvider = ({ children }: { children: ReactNode }) => {
 
   const resetProducts = useCallback(async (logAction: LogAction, user: User | null) => {
     const { db } = getClientFirebase();
+    allowEmptyProductsFor(60_000);
     const batch = writeBatch(db);
     products.forEach(p => batch.delete(doc(db, 'products', p.id)));
     
@@ -539,7 +564,7 @@ export const AdminProvider = ({ children }: { children: ReactNode }) => {
     }).catch(async (error) => {
         errorEmitter.emit('permission-error', new FirestorePermissionError({ path: 'products', operation: 'delete' }));
     });
-  }, [products]);
+  }, [products, allowEmptyProductsFor]);
 
   const resetFinancials = useCallback(async (logAction: LogAction, user: User | null) => {
     const { db } = getClientFirebase();
@@ -632,6 +657,7 @@ export const AdminProvider = ({ children }: { children: ReactNode }) => {
 
   const deleteProduct = useCallback(async (productId: string, logAction: LogAction, user: User | null) => {
       const { db } = getClientFirebase();
+      allowEmptyProductsFor(30_000);
       const productRef = doc(db, 'products', productId);
       const productToDelete = products.find(p => p.id === productId);
 
@@ -651,7 +677,60 @@ export const AdminProvider = ({ children }: { children: ReactNode }) => {
             operation: 'delete',
         }));
       });
-  }, [products, toast]);
+  }, [products, toast, allowEmptyProductsFor]);
+
+  const importProducts = useCallback(async (productsToImport: Product[], logAction: LogAction, user: User | null) => {
+    const { db } = getClientFirebase();
+
+    const validProducts = (productsToImport || []).filter((p) => p && typeof p.name === 'string' && typeof p.price === 'number');
+    if (validProducts.length === 0) {
+      toast({ title: 'Nada para importar', description: 'O arquivo não contém produtos válidos.', variant: 'destructive' });
+      return;
+    }
+
+    const BATCH_LIMIT = 400;
+    const now = new Date().toISOString();
+
+    try {
+      let batch = writeBatch(db);
+      let inBatchCount = 0;
+
+      for (const originalProduct of validProducts) {
+        const docId =
+          originalProduct.id ||
+          `PROD-${Date.now().toString().slice(-6)}-${Math.random().toString(16).slice(2, 6)}`;
+
+        const productToWrite: Partial<Product> & { id: string } = {
+          ...originalProduct,
+          id: docId,
+          createdAt: originalProduct.createdAt || now,
+        };
+
+        if (!productToWrite['data-ai-hint'] && typeof productToWrite.name === 'string') {
+          productToWrite['data-ai-hint'] = productToWrite.name.toLowerCase().split(' ').slice(0, 2).join(' ');
+        }
+
+        batch.set(doc(db, 'products', docId), productToWrite, { merge: true });
+        inBatchCount++;
+
+        if (inBatchCount >= BATCH_LIMIT) {
+          await batch.commit();
+          batch = writeBatch(db);
+          inBatchCount = 0;
+        }
+      }
+
+      if (inBatchCount > 0) {
+        await batch.commit();
+      }
+
+      logAction('Importação de Produtos', `${validProducts.length} produtos foram importados para o catálogo.`, user);
+      toast({ title: 'Produtos importados!', description: `${validProducts.length} produtos foram gravados no catálogo.` });
+    } catch (error) {
+      errorEmitter.emit('permission-error', new FirestorePermissionError({ path: 'products', operation: 'write' }));
+      toast({ title: 'Erro ao importar', description: 'Falha ao escrever os produtos no banco.', variant: 'destructive' });
+    }
+  }, [toast]);
 
   const addCategory = useCallback(async (categoryName: string, logAction: LogAction, user: User | null) => {
     const { db } = getClientFirebase();
@@ -1924,7 +2003,7 @@ export const AdminProvider = ({ children }: { children: ReactNode }) => {
   
   const value = useMemo(() => ({
     addOrder, addCustomer, generateCustomerCodes, deleteOrder, permanentlyDeleteOrder, updateOrderStatus, recordInstallmentPayment, reversePayment, updateInstallmentDueDate, updateInstallmentAmount, updateCustomer, deleteCustomer, restoreCustomerFromTrash, importCustomers, updateOrderDetails,
-    addProduct, updateProduct, deleteProduct,
+    addProduct, updateProduct, deleteProduct, importProducts,
     addCategory, deleteCategory, updateCategoryName, addSubcategory, updateSubcategory, deleteSubcategory, moveCategory, reorderSubcategories, moveSubcategory,
     payCommissions, reverseCommissionPayment,
     restoreAdminData, resetOrders, resetProducts, resetFinancials, resetAllAdminData,
@@ -1944,7 +2023,7 @@ export const AdminProvider = ({ children }: { children: ReactNode }) => {
     commissionSummary,
   }), [
     addOrder, addCustomer, generateCustomerCodes, deleteOrder, permanentlyDeleteOrder, updateOrderStatus, recordInstallmentPayment, reversePayment, updateInstallmentDueDate, updateInstallmentAmount, updateCustomer, deleteCustomer, restoreCustomerFromTrash, importCustomers, updateOrderDetails,
-    addProduct, updateProduct, deleteProduct,
+    addProduct, updateProduct, deleteProduct, importProducts,
     addCategory, deleteCategory, updateCategoryName, addSubcategory, updateSubcategory, deleteSubcategory, moveCategory, reorderSubcategories, moveSubcategory,
     payCommissions, reverseCommissionPayment,
     restoreAdminData, resetOrders, resetProducts, resetFinancials, resetAllAdminData,

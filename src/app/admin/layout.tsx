@@ -123,7 +123,7 @@ function AdminLayoutContent({ children }: { children: ReactNode }) {
             // Check for commercial hours access
             if (
                 settings.accessControlEnabled && 
-                user.role === 'vendedor' && 
+                (user.role === 'vendedor' || user.role === 'vendedor_externo') && 
                 !isWithinCommercialHours(settings.commercialHourStart || '00:00', settings.commercialHourEnd || '23:59')
             ) {
                  toast({

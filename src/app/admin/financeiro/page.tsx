@@ -10,7 +10,7 @@ import { Button } from '@/components/ui/button';
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis, Legend } from 'recharts';
 import { ChartContainer, ChartTooltipContent, ChartTooltip } from '@/components/ui/chart';
 import { DollarSign, CheckCircle, Clock, Percent, Award, FileText, TrendingUp, Eye, Printer, TrendingDown, ShoppingCart, Users as UsersIcon } from 'lucide-react';
-import { format, parseISO } from 'date-fns';
+import { format, isValid, parse, parseISO } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { useRouter } from 'next/navigation';
@@ -24,6 +24,31 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 
 const formatCurrency = (value: number) => {
   return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(value);
+};
+
+const parseFlexibleDate = (value: string) => {
+  const trimmed = value?.trim();
+  if (!trimmed) return null;
+
+  const isoParsed = parseISO(trimmed);
+  if (isValid(isoParsed)) return isoParsed;
+
+  const patterns = [
+    'dd/MM/yy HH:mm:ss',
+    'dd/MM/yyyy HH:mm:ss',
+    'dd/MM/yy HH:mm',
+    'dd/MM/yyyy HH:mm',
+    'dd/MM/yy',
+    'dd/MM/yyyy',
+  ];
+
+  for (const pattern of patterns) {
+    const parsed = parse(trimmed, pattern, new Date());
+    if (isValid(parsed)) return parsed;
+  }
+
+  const fallback = new Date(trimmed);
+  return isValid(fallback) ? fallback : null;
 };
 
 const formatOrderProducts = (items: Order['items']) => {
@@ -74,16 +99,22 @@ export default function FinanceiroPage() {
   
   const deliveredOrders = useMemo(() => {
     if (!orders) return [];
-    return orders.filter(o => o.status === 'Entregue').sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+    return orders
+      .filter((o) => o.status === 'Entregue')
+      .sort((a, b) => {
+        const timeA = parseFlexibleDate(a.date)?.getTime() ?? 0;
+        const timeB = parseFlexibleDate(b.date)?.getTime() ?? 0;
+        return timeB - timeA;
+      });
   }, [orders]);
 
   const anosDisponiveis = useMemo(() => {
     if (!orders) return [anoSelecionado];
     const years = new Set<string>();
     orders.forEach((o) => {
-      try {
-        years.add(format(parseISO(o.date), 'yyyy'));
-      } catch {
+      const date = parseFlexibleDate(o.date);
+      if (date) {
+        years.add(format(date, 'yyyy'));
       }
     });
     const sorted = Array.from(years).sort((a, b) => Number(b) - Number(a));
@@ -99,12 +130,9 @@ export default function FinanceiroPage() {
   const ordersDoPeriodo = useMemo(() => {
     if (!orders) return [];
     return orders.filter((o) => {
-      try {
-        const date = parseISO(o.date);
-        return format(date, 'MM') === mesSelecionado && format(date, 'yyyy') === anoSelecionado;
-      } catch {
-        return false;
-      }
+      const date = parseFlexibleDate(o.date);
+      if (!date) return false;
+      return format(date, 'MM') === mesSelecionado && format(date, 'yyyy') === anoSelecionado;
     });
   }, [orders, mesSelecionado, anoSelecionado]);
 
@@ -136,9 +164,15 @@ export default function FinanceiroPage() {
     });
 
     return Array.from(performanceMap.values())
-      .filter((s) => s.salesCount > 0)
-      .sort((a, b) => b.totalSold - a.totalSold);
+      .sort((a, b) => {
+        if (b.totalSold !== a.totalSold) return b.totalSold - a.totalSold;
+        return a.name.localeCompare(b.name);
+      });
   }, [ordersDoPeriodo, users]);
+
+  const sellerPerformanceWithCommission = useMemo(() => {
+    return sellerPerformance.filter((s) => s.salesCount > 0 && s.totalCommission > 0);
+  }, [sellerPerformance]);
 
 
   const handlePayCommission = async (seller: SellerCommissionDetails) => {
@@ -274,15 +308,19 @@ export default function FinanceiroPage() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {sellerPerformance.length > 0 ? (
-                sellerPerformance.map(seller => (
+              {sellerPerformanceWithCommission.length > 0 ? (
+                sellerPerformanceWithCommission.map(seller => (
                   <TableRow key={seller.id}>
                     <TableCell className="font-medium">{seller.name}</TableCell>
                     <TableCell className="text-center">{seller.salesCount}</TableCell>
                     <TableCell className="text-right">{formatCurrency(seller.totalSold)}</TableCell>
                     <TableCell className="text-right font-semibold">{formatCurrency(seller.totalCommission)}</TableCell>
                     <TableCell className="text-right">
-                      <Button variant="outline" size="sm" onClick={() => handleOpenPerformanceDetails(seller)}>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => handleOpenPerformanceDetails(seller)}
+                      >
                         <Eye className="mr-2 h-4 w-4" /> Ver Vendas
                       </Button>
                     </TableCell>
@@ -290,7 +328,7 @@ export default function FinanceiroPage() {
                 ))
               ) : (
                 <TableRow>
-                  <TableCell colSpan={5} className="h-24 text-center">Nenhuma venda registrada no período.</TableCell>
+                  <TableCell colSpan={5} className="h-24 text-center">Nenhuma venda com comissão registrada no período.</TableCell>
                 </TableRow>
               )}
             </TableBody>
@@ -303,26 +341,30 @@ export default function FinanceiroPage() {
   const printSellersSection = (
     <div className={`print-section print-section-sellers mt-8${isManager ? '' : ' page-break-before'}`}>
       <h2 className="text-xl font-semibold text-center mb-4">Desempenho dos Vendedores</h2>
-      <table className="w-full text-sm border-collapse">
-        <thead>
-          <tr className="border-b-2">
-            <th className="text-left p-2 font-bold">Vendedor</th>
-            <th className="text-center p-2 font-bold">Vendas</th>
-            <th className="text-right p-2 font-bold">Total Vendido</th>
-            <th className="text-right p-2 font-bold">Comissão Gerada</th>
-          </tr>
-        </thead>
-        <tbody>
-          {sellerPerformance.map(seller => (
-            <tr key={seller.id} className="border-b last:border-none">
-              <td className="p-2">{seller.name}</td>
-              <td className="text-center p-2">{seller.salesCount}</td>
-              <td className="text-right p-2">{formatCurrency(seller.totalSold)}</td>
-              <td className="text-right p-2 font-semibold">{formatCurrency(seller.totalCommission)}</td>
+      {sellerPerformanceWithCommission.length > 0 ? (
+        <table className="w-full text-sm border-collapse">
+          <thead>
+            <tr className="border-b-2">
+              <th className="text-left p-2 font-bold">Vendedor</th>
+              <th className="text-center p-2 font-bold">Vendas</th>
+              <th className="text-right p-2 font-bold">Total Vendido</th>
+              <th className="text-right p-2 font-bold">Comissão Gerada</th>
             </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {sellerPerformanceWithCommission.map(seller => (
+              <tr key={seller.id} className="border-b last:border-none">
+                <td className="p-2">{seller.name}</td>
+                <td className="text-center p-2">{seller.salesCount}</td>
+                <td className="text-right p-2">{formatCurrency(seller.totalSold)}</td>
+                <td className="text-right p-2 font-semibold">{formatCurrency(seller.totalCommission)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      ) : (
+        <p className="text-center text-sm text-muted-foreground">Nenhuma venda com comissão registrada no período.</p>
+      )}
     </div>
   );
 
@@ -365,12 +407,12 @@ export default function FinanceiroPage() {
             <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
               <Card>
                 <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                  <CardTitle className="text-sm font-medium">Total Vendido</CardTitle>
+                  <CardTitle className="text-sm font-medium">Vendas do Mês</CardTitle>
                   <DollarSign className="h-4 w-4 text-muted-foreground" />
                 </CardHeader>
                 <CardContent>
                   <div className="text-2xl font-bold">{formatCurrency(financialSummary.totalVendido)}</div>
-                  <p className="text-xs text-muted-foreground">Soma de todos os pedidos</p>
+                  <p className="text-xs text-muted-foreground">Somente pedidos do mês atual</p>
                 </CardContent>
               </Card>
               <Card>
@@ -524,7 +566,7 @@ export default function FinanceiroPage() {
               <table className="w-full text-base border-collapse">
                 <tbody>
                   <tr className="border-b">
-                    <td className="p-2 font-medium">Total Vendido</td>
+                    <td className="p-2 font-medium">Vendas do Mês</td>
                     <td className="p-2 text-right font-bold">{formatCurrency(financialSummary.totalVendido)}</td>
                   </tr>
                   <tr className="border-b">
@@ -579,7 +621,12 @@ export default function FinanceiroPage() {
                     <tbody>
                       {deliveredOrders.map(order => (
                         <tr key={order.id} className="border-b last:border-none">
-                          <td className="p-2">{format(parseISO(order.date), 'dd/MM/yy')}</td>
+                          <td className="p-2">
+                            {(() => {
+                              const date = parseFlexibleDate(order.date);
+                              return date ? format(date, 'dd/MM/yy') : order.date;
+                            })()}
+                          </td>
                           <td className="p-2 font-mono">{order.id}</td>
                           <td className="p-2">{order.customer.name}</td>
                           <td className="p-2">{order.sellerName}</td>
@@ -658,7 +705,12 @@ export default function FinanceiroPage() {
                 {ordersForSelectedCommissionSeller.length > 0 ? (
                   ordersForSelectedCommissionSeller.map(order => (
                     <TableRow key={order.id}>
-                      <TableCell>{format(parseISO(order.date), "dd/MM/yy")}</TableCell>
+                      <TableCell>
+                        {(() => {
+                          const date = parseFlexibleDate(order.date);
+                          return date ? format(date, 'dd/MM/yy') : order.date;
+                        })()}
+                      </TableCell>
                       <TableCell className="font-mono">{order.id}</TableCell>
                       <TableCell>{order.customer.name}</TableCell>
                       <TableCell className="text-right">{formatCurrency(order.total)}</TableCell>
@@ -703,7 +755,10 @@ export default function FinanceiroPage() {
                     {(selectedPerformanceSeller?.orders.length ?? 0) > 0 ? (
                         selectedPerformanceSeller?.orders.map(order => (
                             <div key={order.id} className="border-b py-1">
-                                {format(parseISO(order.date), "dd/MM/yy")} | {order.id} | {order.customer.name} | {formatOrderProducts(order.items)} | {formatCurrency(order.total)} | {formatCurrency(order.commission || 0)}
+                                {(() => {
+                                  const date = parseFlexibleDate(order.date);
+                                  return date ? format(date, 'dd/MM/yy') : order.date;
+                                })()} | {order.id} | {order.customer.name} | {formatOrderProducts(order.items)} | {formatCurrency(order.total)} | {formatCurrency(order.commission || 0)}
                             </div>
                         ))
                     ) : (
@@ -728,7 +783,12 @@ export default function FinanceiroPage() {
                             {(selectedPerformanceSeller?.orders.length ?? 0) > 0 ? (
                                 selectedPerformanceSeller?.orders.map(order => (
                                     <TableRow key={order.id}>
-                                        <TableCell>{format(parseISO(order.date), "dd/MM/yy")}</TableCell>
+                                        <TableCell>
+                                          {(() => {
+                                            const date = parseFlexibleDate(order.date);
+                                            return date ? format(date, 'dd/MM/yy') : order.date;
+                                          })()}
+                                        </TableCell>
                                         <TableCell className="font-mono">{order.id}</TableCell>
                                         <TableCell>{order.customer.name}</TableCell>
                                         <TableCell className="max-w-[260px] truncate" title={formatOrderProducts(order.items)}>
