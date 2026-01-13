@@ -5,7 +5,7 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import { useToast } from '@/hooks/use-toast';
 import { getClientFirebase } from '@/lib/firebase-client';
-import { doc, getDoc, setDoc, onSnapshot } from 'firebase/firestore';
+import { doc, setDoc, onSnapshot } from 'firebase/firestore';
 import { useAudit } from './AuditContext';
 import { useAuth } from './AuthContext';
 import { errorEmitter } from '@/firebase/error-emitter';
@@ -26,7 +26,7 @@ const initialSettings: StoreSettings = {
 
 interface SettingsContextType {
     settings: StoreSettings;
-    updateSettings: (newSettings: StoreSettings) => Promise<void>;
+    updateSettings: (newSettings: Partial<StoreSettings>) => Promise<void>;
     isLoading: boolean;
     restoreSettings: (settings: StoreSettings) => Promise<void>;
     resetSettings: () => Promise<void>;
@@ -70,16 +70,12 @@ export const SettingsProvider = ({ children }: { children: ReactNode }) => {
         try {
             const { db } = getClientFirebase();
             const settingsRef = doc(db, 'config', 'storeSettings');
-            
-            // Fetch the current settings from the database first
-            const currentDoc = await getDoc(settingsRef);
-            const currentSettings = currentDoc.exists() ? currentDoc.data() as StoreSettings : initialSettings;
-            
-            // Merge the existing settings with the new ones
-            const mergedSettings = { ...currentSettings, ...newSettings };
-            
-            // Save the complete, merged object without the merge option
-            await setDoc(settingsRef, mergedSettings);
+
+            const cleanedNewSettings = Object.fromEntries(
+                Object.entries(newSettings).filter(([, value]) => value !== undefined)
+            ) as Partial<StoreSettings>;
+
+            await setDoc(settingsRef, cleanedNewSettings, { merge: true });
 
             logAction('Atualização de Configurações', `Configurações da loja foram alteradas.`, user);
             toast({

@@ -130,7 +130,7 @@ interface AdminContextType {
   moveSubcategory: (sourceCategoryId: string, subName: string, targetCategoryId: string, logAction: LogAction, user: User | null) => Promise<void>;
   payCommissions: (sellerId: string, sellerName: string, amount: number, orderIds: string[], period: string, logAction: LogAction, user: User | null) => Promise<string | null>;
   reverseCommissionPayment: (paymentId: string, logAction: LogAction, user: User | null) => Promise<void>;
-  restoreAdminData: (data: { products: Product[], orders: Order[], categories: Category[] }, logAction: LogAction, user: User | null) => Promise<void>;
+  restoreAdminData: (data: { products: Product[], orders: Order[], categories: Category[], commissionPayments?: CommissionPayment[], stockAudits?: StockAudit[], avarias?: Avaria[], chatSessions?: ChatSession[], customers?: CustomerInfo[], customersTrash?: CustomerInfo[] }, logAction: LogAction, user: User | null) => Promise<void>;
   resetOrders: (logAction: LogAction, user: User | null) => Promise<void>;
   resetProducts: (logAction: LogAction, user: User | null) => Promise<void>;
   resetFinancials: (logAction: LogAction, user: User | null) => Promise<void>;
@@ -400,7 +400,7 @@ export const AdminProvider = ({ children }: { children: ReactNode }) => {
     return { totalPendingCommission, commissionsBySeller };
   }, [orders, users]);
   
-  const restoreAdminData = useCallback(async (data: { products: Product[], orders: Order[], categories: Category[] }, logAction: LogAction, user: User | null) => {
+  const restoreAdminData = useCallback(async (data: { products: Product[], orders: Order[], categories: Category[], commissionPayments?: CommissionPayment[], stockAudits?: StockAudit[], avarias?: Avaria[], chatSessions?: ChatSession[], customers?: CustomerInfo[], customersTrash?: CustomerInfo[] }, logAction: LogAction, user: User | null) => {
     const { db } = getClientFirebase();
     const BATCH_LIMIT = 400;
 
@@ -443,12 +443,62 @@ export const AdminProvider = ({ children }: { children: ReactNode }) => {
         }
     };
 
+    const replaceCustomersCollection = async (collectionName: 'customers' | 'customersTrash', customersToRestore: CustomerInfo[] | undefined) => {
+        const snapshot = await getDocs(collection(db, collectionName));
+        const existingDocs = snapshot.docs;
+
+        if (existingDocs.length > 0) {
+            let deleteBatch = writeBatch(db);
+            let deleteCount = 0;
+            for (const d of existingDocs) {
+                deleteBatch.delete(doc(db, collectionName, d.id));
+                deleteCount++;
+                if (deleteCount >= BATCH_LIMIT) {
+                    await deleteBatch.commit();
+                    deleteBatch = writeBatch(db);
+                    deleteCount = 0;
+                }
+            }
+            if (deleteCount > 0) {
+                await deleteBatch.commit();
+            }
+        }
+
+        const validCustomers = (customersToRestore || [])
+            .map((c) => ({ ...c, cpf: normalizeCpf(c.cpf || '') }))
+            .filter((c) => c.cpf && c.cpf.length === 11);
+
+        if (validCustomers.length > 0) {
+            let writeBatchOp = writeBatch(db);
+            let writeCount = 0;
+            for (const c of validCustomers) {
+                const docId = c.cpf as string;
+                writeBatchOp.set(doc(db, collectionName, docId), { ...sanitizeCustomerForFirestore(c), cpf: docId }, { merge: true });
+                writeCount++;
+                if (writeCount >= BATCH_LIMIT) {
+                    await writeBatchOp.commit();
+                    writeBatchOp = writeBatch(db);
+                    writeCount = 0;
+                }
+            }
+            if (writeCount > 0) {
+                await writeBatchOp.commit();
+            }
+        }
+    };
+
     try {
         await processCollectionInBatches('products', data.products, products);
         await processCollectionInBatches('orders', data.orders, orders);
         await processCollectionInBatches('categories', data.categories, categories);
+        await processCollectionInBatches('commissionPayments', data.commissionPayments || [], commissionPayments);
+        await processCollectionInBatches('stockAudits', data.stockAudits || [], stockAudits);
+        await processCollectionInBatches('avarias', data.avarias || [], avarias);
+        await processCollectionInBatches('chatSessions', data.chatSessions || [], chatSessions);
+        await replaceCustomersCollection('customers', data.customers);
+        await replaceCustomersCollection('customersTrash', data.customersTrash);
         
-        logAction('Restauração de Backup', 'Todos os dados de produtos, pedidos e categorias foram restaurados.', user);
+        logAction('Restauração de Backup', 'Todos os dados foram restaurados a partir de um backup.', user);
         toast({ title: 'Dados restaurados com sucesso!' });
     } catch (error) {
         console.error("Error restoring data:", error);
@@ -459,7 +509,7 @@ export const AdminProvider = ({ children }: { children: ReactNode }) => {
             operation: 'write',
         });
     }
-  }, [products, orders, categories, toast]);
+  }, [products, orders, categories, commissionPayments, stockAudits, avarias, chatSessions, toast]);
 
 
   const resetOrders = useCallback(async (logAction: LogAction, user: User | null) => {

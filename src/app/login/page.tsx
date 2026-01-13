@@ -8,6 +8,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter }
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Shield } from 'lucide-react';
+import Link from 'next/link';
 
 export default function LoginPage() {
   const { login } = useAuth();
@@ -52,9 +53,12 @@ export default function LoginPage() {
                 />
             </div>
             </CardContent>
-            <CardFooter>
+            <CardFooter className="flex flex-col gap-2">
                 <Button type="submit" className="w-full">
                     Entrar
+                </Button>
+                <Button variant="link" size="sm" className="text-muted-foreground" asChild>
+                  <Link href="/">Ir para o Catálogo</Link>
                 </Button>
             </CardFooter>
         </form>

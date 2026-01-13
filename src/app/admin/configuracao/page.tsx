@@ -30,6 +30,8 @@ import { ptBR } from 'date-fns/locale';
 import Image from 'next/image';
 import { Switch } from '@/components/ui/switch';
 import { useData } from '@/context/DataContext';
+import { getClientFirebase } from '@/lib/firebase-client';
+import { doc, getDoc, setDoc } from 'firebase/firestore';
 
 const settingsSchema = z.object({
   storeName: z.string().min(3, 'O nome da loja é obrigatório.'),
@@ -134,7 +136,7 @@ export default function ConfiguracaoPage() {
   const { settings, updateSettings, isLoading: settingsLoading, restoreSettings, resetSettings } = useSettings();
   const { restoreAdminData, resetOrders, resetProducts, resetFinancials, resetAllAdminData } = useAdmin();
   const { products, categories } = useData();
-  const { orders, customers } = useAdminData();
+  const { orders, customers, deletedCustomers, commissionPayments, stockAudits, avarias, chatSessions } = useAdminData();
   const { user, users, restoreUsers } = useAuth();
   const { permissions, updatePermissions, isLoading: permissionsLoading, resetPermissions } = usePermissions();
   const { toast } = useToast();
@@ -200,6 +202,36 @@ export default function ConfiguracaoPage() {
     toast({ title: 'Exportação Concluída!', description: `O arquivo ${filename} foi baixado.` });
   };
 
+  const handleExportFullBackup = async () => {
+    try {
+      const { db } = getClientFirebase();
+      const customerCodeCounterSnap = await getDoc(doc(db, 'config', 'customerCodeCounter'));
+      const customerCodeCounter = customerCodeCounterSnap.exists() ? customerCodeCounterSnap.data() : null;
+
+      const backup = {
+        version: 1,
+        exportedAt: new Date().toISOString(),
+        settings,
+        permissions,
+        customerCodeCounter,
+        products,
+        categories,
+        orders,
+        customers,
+        customersTrash: deletedCustomers,
+        users,
+        commissionPayments,
+        stockAudits,
+        avarias,
+        chatSessions,
+      };
+
+      handleExport(backup, 'backup-completo');
+    } catch (error) {
+      console.error("Failed to export full backup:", error);
+      toast({ title: 'Erro ao Exportar', description: 'Não foi possível gerar o backup completo.', variant: 'destructive' });
+    }
+  };
 
   const handleRestore = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -213,10 +245,24 @@ export default function ConfiguracaoPage() {
 
         if (data.settings && data.products && data.orders && data.categories && data.users) {
           await restoreSettings(data.settings);
-          await restoreAdminData({ products: data.products, orders: data.orders, categories: data.categories }, logAction, user);
+          await restoreAdminData({
+            products: data.products,
+            orders: data.orders,
+            categories: data.categories,
+            commissionPayments: data.commissionPayments,
+            stockAudits: data.stockAudits,
+            avarias: data.avarias,
+            chatSessions: data.chatSessions,
+            customers: data.customers,
+            customersTrash: data.customersTrash,
+          }, logAction, user);
           await restoreUsers(data.users);
           if (data.permissions) {
              await updatePermissions(data.permissions);
+          }
+          if (data.customerCodeCounter) {
+            const { db } = getClientFirebase();
+            await setDoc(doc(db, 'config', 'customerCodeCounter'), data.customerCodeCounter, { merge: true });
           }
         } else {
           throw new Error('Formato de arquivo de backup inválido.');
@@ -593,6 +639,10 @@ export default function ConfiguracaoPage() {
               <div>
                 <h3 className="font-semibold mb-2">Exportar Dados</h3>
                 <div className="flex flex-col sm:flex-row gap-4">
+                    <Button variant="outline" onClick={handleExportFullBackup}>
+                        <FileDown className="mr-2 h-4 w-4" />
+                        Baixar Backup Completo
+                    </Button>
                     <Button variant="outline" onClick={() => handleExport(orders, 'pedidos')}>
                         <ShoppingCart className="mr-2 h-4 w-4" />
                         Exportar Pedidos
