@@ -23,19 +23,6 @@ const formatCurrency = (value: number) => {
   return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(value);
 };
 
-const abbreviateProductsText = (text: string, maxLen: number) => {
-  if (!text) return '';
-  if (text.length <= maxLen) return text;
-
-  const suffixMatch = text.match(/\s\(\+\d+\)$/);
-  const suffix = suffixMatch ? suffixMatch[0] : '';
-  const base = suffix ? text.slice(0, -suffix.length) : text;
-
-  const allowedBaseLen = Math.max(0, maxLen - suffix.length);
-  const truncatedBase = base.slice(0, Math.max(0, allowedBaseLen - 1)).trimEnd();
-  return `${truncatedBase}…${suffix}`;
-};
-
 const initialSettings: StoreSettings = {
     storeName: 'ADC Móveis', storeCity: '', storeAddress: '', pixKey: '', storePhone: ''
 };
@@ -45,21 +32,19 @@ const CarnetContent = ({ order, settings, pixPayload, productCodeById }: { order
     const subtotal = useMemo(() => order.items.reduce((acc, item) => acc + (item.price * item.quantity), 0), [order.items]);
     const valorFinanciado = order.total;
     const isOrderPaidOff = useMemo(() => (order.installmentDetails || []).every((inst) => inst.status === 'Pago'), [order.installmentDetails]);
-    const productsShort = useMemo(() => {
+    const productsList = useMemo(() => {
         const items = order.items || [];
-        if (items.length === 0) return '';
-        const first = items[0];
-        const firstCode = productCodeById.get(first.id) || '1';
-        const firstLabel = `${firstCode} - ${first.name}`;
-        if (items.length === 1) return firstLabel;
-        return `${firstLabel} (+${items.length - 1})`;
+        return items.map((item, index) => {
+            const code = productCodeById.get(item.id) || String(index + 1);
+            const quantity = item.quantity || 0;
+            return {
+                key: `${item.id}-${index}`,
+                code,
+                name: item.name,
+                quantity,
+            };
+        });
     }, [order.items, productCodeById]);
-    const productsShortAbbrev = useMemo(() => {
-        return abbreviateProductsText(productsShort, 26);
-    }, [productsShort]);
-    const productsHeaderAbbrev = useMemo(() => {
-        return abbreviateProductsText(productsShort, 120);
-    }, [productsShort]);
     const customerNameWithCode = useMemo(() => {
         const code = (order.customer.code || '').trim();
         if (!code) return order.customer.name;
@@ -158,11 +143,18 @@ const CarnetContent = ({ order, settings, pixPayload, productCodeById }: { order
                     </div>
                 )}
             </div>
-            <div className="sm:col-span-2 sm:row-start-3 space-y-0.5">
+            <div className="sm:col-span-2 sm:row-start-2 space-y-0.5">
                 <p className="carnet-label text-[9px] text-muted-foreground">PRODUTO(S)</p>
-                <p className="carnet-products-value font-semibold text-xs print:text-[10px] leading-tight whitespace-normal break-words">
-                    {productsHeaderAbbrev}
-                </p>
+                <div className="carnet-products-value font-semibold text-[11px] print:text-[10px] leading-tight">
+                    {productsList.map((item) => (
+                        <div key={item.key} className="break-words">
+                            <span>
+                                {item.code} - {item.name}
+                            </span>
+                            {item.quantity > 1 && <span> (x{item.quantity})</span>}
+                        </div>
+                    ))}
+                </div>
             </div>
         </div>
         
@@ -171,11 +163,10 @@ const CarnetContent = ({ order, settings, pixPayload, productCodeById }: { order
                 <table className="carnet-installments-table w-full table-fixed text-sm print:text-[11px]">
                     <thead className="bg-muted/50 print:bg-gray-100">
                         <tr className="border-b">
-                            <th className="px-2 py-1 print:px-1 print:py-0.5 text-center font-semibold w-[12%]">Parc.</th>
-                            <th className="px-2 py-1 print:px-1 print:py-0.5 text-left font-semibold w-[16%]">Venc.</th>
-                            <th className="px-2 py-1 print:px-1 print:py-0.5 text-left font-semibold w-[28%]">Produto</th>
-                            <th className="px-2 py-1 print:px-1 print:py-0.5 text-right font-semibold w-[22%]">Valor (R$)</th>
-                            <th className="px-2 py-1 print:px-1 print:py-0.5 text-left font-semibold w-[22%]">Data Pag.</th>
+                            <th className="px-2 py-1 print:px-1 print:py-0.5 text-center font-semibold w-[16%]">Parc.</th>
+                            <th className="px-2 py-1 print:px-1 print:py-0.5 text-left font-semibold w-[22%]">Venc.</th>
+                            <th className="px-2 py-1 print:px-1 print:py-0.5 text-right font-semibold w-[26%]">Valor (R$)</th>
+                            <th className="px-2 py-1 print:px-1 print:py-0.5 text-left font-semibold w-[36%]">Data Pag.</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -183,9 +174,6 @@ const CarnetContent = ({ order, settings, pixPayload, productCodeById }: { order
                             <tr key={installment.installmentNumber} className="border-b last:border-none">
                                 <td className="px-2 py-1 print:px-1 print:py-0.5 text-center font-semibold">{installment.installmentNumber}/{order.installments}</td>
                                 <td className="px-2 py-1 print:px-1 print:py-0.5 font-semibold">{format(parseISO(installment.dueDate), 'dd/MM/yy')}</td>
-                                <td className="px-2 py-1 print:px-1 print:py-0.5 font-semibold">
-                                    <span className="block truncate">{productsShortAbbrev}</span>
-                                </td>
                                 <td className="px-2 py-1 print:px-1 print:py-0.5 text-right font-mono font-semibold">{formatCurrency(installment.amount)}</td>
                                 <td className="px-2 py-1 print:px-1 print:py-0.5 border-l">
                                     {installment.status === 'Pago' 
