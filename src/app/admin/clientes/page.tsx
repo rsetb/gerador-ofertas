@@ -425,7 +425,7 @@ export default function CustomersAdminPage() {
             sellerName: undefined,
         }));
     } else {
-      const seller = sellers.find(s => s.id === sellerId);
+      const seller = assignableSellers.find(s => s.id === sellerId);
       if (seller) {
           setEditedInfo(prev => ({
               ...prev,
@@ -547,9 +547,13 @@ Não esqueça de enviar o comprovante!`;
   const canAccessTrash = user?.role === 'admin' || user?.role === 'gerente';
   const isAdmin = user?.role === 'admin';
 
-  const sellers = useMemo(() => {
+  const sellersForFilter = useMemo(() => {
     return users.filter(u => u.role === 'vendedor' || u.role === 'admin' || u.role === 'gerente');
   }, [users]);
+
+  const assignableSellers = useMemo(() => {
+    return sellersForFilter.filter(u => u.canBeAssigned !== false);
+  }, [sellersForFilter]);
   
   const handleAssignSeller = (order: Order, seller: User) => {
     if (!seller) return;
@@ -566,6 +570,7 @@ Não esqueça de enviar o comprovante!`;
   
   const handleAssignToMe = (order: Order) => {
     if (!user) return;
+    if (user.canBeAssigned === false) return;
     handleAssignSeller(order, user);
   };
 
@@ -584,7 +589,12 @@ Não esqueça de enviar o comprovante!`;
                                 variant="outline"
                                 size="sm"
                                 onClick={() => {
-                                    if (user?.id) setNewCustomerSellerId(user.id);
+                                    const myAssignableId = assignableSellers.find(s => s.id === user?.id)?.id;
+                                    if (myAssignableId) {
+                                        setNewCustomerSellerId(myAssignableId);
+                                    } else if (assignableSellers[0]?.id) {
+                                        setNewCustomerSellerId(assignableSellers[0].id);
+                                    }
                                     setIsAddCustomerDialogOpen(true);
                                 }}
                             >
@@ -1085,11 +1095,15 @@ Não esqueça de enviar o comprovante!`;
                                                         <DropdownMenuContent align="start">
                                                             <DropdownMenuLabel>Selecione o Vendedor</DropdownMenuLabel>
                                                             <DropdownMenuSeparator />
-                                                            {sellers.map(s => (
-                                                                <DropdownMenuItem key={s.id} onSelect={() => handleAssignSeller(order, s)}>
-                                                                    {s.name}
-                                                                </DropdownMenuItem>
-                                                            ))}
+                                                            {assignableSellers.length > 0 ? (
+                                                                assignableSellers.map(s => (
+                                                                    <DropdownMenuItem key={s.id} onSelect={() => handleAssignSeller(order, s)}>
+                                                                        {s.name}
+                                                                    </DropdownMenuItem>
+                                                                ))
+                                                            ) : (
+                                                                <DropdownMenuItem disabled>Nenhum vendedor disponível</DropdownMenuItem>
+                                                            )}
                                                         </DropdownMenuContent>
                                                     </DropdownMenu>
                                                 </div>
@@ -1297,7 +1311,7 @@ Não esqueça de enviar o comprovante!`;
                             </SelectTrigger>
                             <SelectContent>
                                 <SelectItem value="none">Nenhum</SelectItem>
-                                {sellers.map(s => (
+                                {assignableSellers.map(s => (
                                     <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>
                                 ))}
                             </SelectContent>
@@ -1358,7 +1372,7 @@ Não esqueça de enviar o comprovante!`;
                             <SelectValue placeholder="Selecione o vendedor" />
                         </SelectTrigger>
                         <SelectContent>
-                            {sellers.map((s) => (
+                            {assignableSellers.map((s) => (
                                 <SelectItem key={s.id} value={s.id}>
                                     {s.name}
                                 </SelectItem>

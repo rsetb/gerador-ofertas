@@ -164,7 +164,9 @@ export default function CreateOrderPage() {
   const [openCustomerPicker, setOpenCustomerPicker] = useState(false);
 
   const sellers = useMemo(() => {
-    return users.filter(u => u.role === 'vendedor' || u.role === 'admin' || u.role === 'gerente');
+    return users
+      .filter(u => u.role === 'vendedor' || u.role === 'admin' || u.role === 'gerente')
+      .filter(u => u.canBeAssigned !== false);
   }, [users]);
   
   const uniqueProducts = useMemo(() => {
@@ -203,7 +205,7 @@ export default function CreateOrderPage() {
     resolver: zodResolver(createOrderSchema),
     defaultValues: {
       customerId: '',
-      sellerId: user?.id || sellers[0]?.id || '',
+      sellerId: sellers.find(s => s.id === user?.id)?.id || sellers[0]?.id || '',
       date: new Date(),
       firstDueDate: addMonths(new Date(), 1),
       items: [],
@@ -213,6 +215,14 @@ export default function CreateOrderPage() {
       observations: '',
     },
   });
+
+  useEffect(() => {
+    const currentSellerId = form.getValues('sellerId');
+    if (!sellers.length) return;
+    if (!currentSellerId || !sellers.some(s => s.id === currentSellerId)) {
+      form.setValue('sellerId', sellers[0].id, { shouldValidate: true });
+    }
+  }, [form, sellers]);
   
   const handleAddItem = (product: Product | CartItem) => {
     setProductSearch('');

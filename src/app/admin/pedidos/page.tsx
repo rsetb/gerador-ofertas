@@ -156,9 +156,13 @@ export default function OrdersAdminPage() {
     setIsClient(true);
   }, []);
 
-  const sellers = useMemo(() => {
+  const sellersForFilter = useMemo(() => {
     return users.filter(u => u.role === 'vendedor' || u.role === 'admin' || u.role === 'gerente');
   }, [users]);
+
+  const assignableSellers = useMemo(() => {
+    return sellersForFilter.filter(u => u.canBeAssigned !== false);
+  }, [sellersForFilter]);
 
   const availableYears = useMemo(() => {
     const currentYear = format(new Date(), 'yyyy');
@@ -403,6 +407,7 @@ export default function OrdersAdminPage() {
 
   const handleAssignToMe = (order: Order) => {
     if (!user) return;
+    if (user.canBeAssigned === false) return;
     handleAssignSeller(order, user);
   }
 
@@ -567,7 +572,7 @@ Não esqueça de enviar o comprovante!`;
                                   </SelectTrigger>
                                   <SelectContent>
                                       <SelectItem value="all">Todos os Vendedores</SelectItem>
-                                      {sellers.map(s => (
+                                      {sellersForFilter.map(s => (
                                           <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>
                                       ))}
                                   </SelectContent>
@@ -740,11 +745,15 @@ Não esqueça de enviar o comprovante!`;
                                                                   </DropdownMenuItem>
                                                                   <Separator />
                                                                   <DropdownMenuLabel>Atribuir a:</DropdownMenuLabel>
-                                                                  {sellers.map(s => (
-                                                                      <DropdownMenuItem key={s.id} onClick={() => handleAssignSeller(order, s)}>
-                                                                          {s.name}
-                                                                      </DropdownMenuItem>
-                                                                  ))}
+                                                                  {assignableSellers.length > 0 ? (
+                                                                      assignableSellers.map(s => (
+                                                                          <DropdownMenuItem key={s.id} onClick={() => handleAssignSeller(order, s)}>
+                                                                              {s.name}
+                                                                          </DropdownMenuItem>
+                                                                      ))
+                                                                  ) : (
+                                                                      <DropdownMenuItem disabled>Nenhum vendedor disponível</DropdownMenuItem>
+                                                                  )}
                                                               </DropdownMenuContent>
                                                           </DropdownMenu>
                                                       </div>

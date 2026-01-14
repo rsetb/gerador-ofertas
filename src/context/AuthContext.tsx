@@ -14,9 +14,9 @@ import { errorEmitter } from '@/firebase/error-emitter';
 // NOTE: In a real application, passwords should be hashed and stored securely in a database.
 // This is for prototype purposes only.
 const initialUsers: User[] = [
-  { id: 'user-1', username: 'admin', password: 'adminpassword', name: 'Administrador', role: 'admin' },
-  { id: 'user-2', username: 'gerente', password: 'gerentepassword', name: 'Gerente Loja', role: 'gerente' },
-  { id: 'user-3', username: 'vendedor', password: 'vendedorpassword', name: 'Vendedor Teste', role: 'vendedor' },
+  { id: 'user-1', username: 'admin', password: 'adminpassword', name: 'Administrador', role: 'admin', canBeAssigned: true },
+  { id: 'user-2', username: 'gerente', password: 'gerentepassword', name: 'Gerente Loja', role: 'gerente', canBeAssigned: true },
+  { id: 'user-3', username: 'vendedor', password: 'vendedorpassword', name: 'Vendedor Teste', role: 'vendedor', canBeAssigned: true },
 ];
 
 interface AuthContextType {
@@ -137,7 +137,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     }
 
     const newUserId = `user-${Date.now()}`;
-    const newUser: User = { ...data, id: newUserId };
+    const newUser: User = { ...data, canBeAssigned: data.canBeAssigned ?? true, id: newUserId };
     
     const userRef = doc(db, 'users', newUserId);
     setDoc(userRef, newUser).then(() => {
@@ -186,6 +186,9 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         }
         if (data.password) {
             details += ' Senha foi alterada.';
+        }
+        if (data.canBeAssigned !== undefined && data.canBeAssigned !== updatedUser.canBeAssigned) {
+            details += ` Atribuível em vendas: de "${updatedUser.canBeAssigned ?? true}" para "${data.canBeAssigned}".`;
         }
         logAction('Atualização de Usuário', details, user);
     }

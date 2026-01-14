@@ -20,11 +20,13 @@ import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from '
 import { useRouter } from 'next/navigation';
 import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Checkbox } from '@/components/ui/checkbox';
 
 const userEditFormSchema = z.object({
     name: z.string().min(3, 'O nome é obrigatório.'),
     username: z.string().min(3, 'O nome de usuário é obrigatório.'),
     role: z.enum(['admin', 'gerente', 'vendedor', 'vendedor_externo'], { required_error: 'O perfil é obrigatório.' }),
+    canBeAssigned: z.boolean().default(true),
     password: z.string().optional(),
     confirmPassword: z.string().optional(),
   }).refine(data => {
@@ -44,6 +46,7 @@ const userCreateFormSchema = z.object({
     name: z.string().min(3, 'O nome é obrigatório.'),
     username: z.string().min(3, 'O nome de usuário é obrigatório.'),
     role: z.enum(['admin', 'gerente', 'vendedor', 'vendedor_externo'], { required_error: 'O perfil é obrigatório.' }),
+    canBeAssigned: z.boolean().default(true),
     password: z.string().min(6, 'A senha deve ter pelo menos 6 caracteres.'),
     confirmPassword: z.string(),
 }).refine(data => data.password === data.confirmPassword, {
@@ -73,6 +76,7 @@ export default function ManageUsersPage() {
             password: '',
             confirmPassword: '',
             role: 'vendedor',
+            canBeAssigned: true,
         }
     });
 
@@ -97,6 +101,7 @@ export default function ManageUsersPage() {
             name: user.name, 
             username: user.username,
             role: user.role,
+            canBeAssigned: user.canBeAssigned ?? true,
             password: '', 
             confirmPassword: '' 
         });
@@ -110,6 +115,7 @@ export default function ManageUsersPage() {
             name: values.name,
             username: values.username,
             role: values.role,
+            canBeAssigned: values.canBeAssigned,
          };
         if (values.password) {
             dataToUpdate.password = values.password;
@@ -267,6 +273,21 @@ export default function ManageUsersPage() {
                             </div>
                             <FormField
                                 control={createForm.control}
+                                name="canBeAssigned"
+                                render={({ field }) => (
+                                    <FormItem className="flex flex-row items-center gap-3 rounded-md border p-3">
+                                        <FormControl>
+                                            <Checkbox
+                                                checked={field.value}
+                                                onCheckedChange={(checked) => field.onChange(checked === true)}
+                                            />
+                                        </FormControl>
+                                        <FormLabel className="cursor-pointer">Pode ser atribuído nas vendas</FormLabel>
+                                    </FormItem>
+                                )}
+                            />
+                            <FormField
+                                control={createForm.control}
                                 name="password"
                                 render={({ field }) => (
                                     <FormItem>
@@ -349,6 +370,21 @@ export default function ManageUsersPage() {
                                             </SelectContent>
                                         </Select>
                                         <FormMessage />
+                                        </FormItem>
+                                    )}
+                                />
+                                <FormField
+                                    control={editForm.control}
+                                    name="canBeAssigned"
+                                    render={({ field }) => (
+                                        <FormItem className="flex flex-row items-center gap-3 rounded-md border p-3">
+                                            <FormControl>
+                                                <Checkbox
+                                                    checked={field.value}
+                                                    onCheckedChange={(checked) => field.onChange(checked === true)}
+                                                />
+                                            </FormControl>
+                                            <FormLabel className="cursor-pointer">Pode ser atribuído nas vendas</FormLabel>
                                         </FormItem>
                                     )}
                                 />

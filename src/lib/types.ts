@@ -148,6 +148,7 @@ export type User = {
   password?: string; 
   name: string;
   role: UserRole;
+  canBeAssigned?: boolean;
 };
 
 export type Category = {
