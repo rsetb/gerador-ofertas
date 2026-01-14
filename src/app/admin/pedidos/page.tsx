@@ -729,9 +729,31 @@ Não esqueça de enviar o comprovante!`;
                                                           <Button variant="outline" size="icon" className="h-8 w-8" onClick={() => handleOpenDetails(order)}>
                                                               <Eye className="h-4 w-4" />
                                                           </Button>
-                                                            <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => handleAssignToMe(order)}>
-                                                                <UserPlus className="h-4 w-4" />
-                                                            </Button>
+                                                          <DropdownMenu>
+                                                              <DropdownMenuTrigger asChild>
+                                                                  <Button variant="ghost" size="icon" className="h-8 w-8">
+                                                                      <UserPlus className="h-4 w-4" />
+                                                                  </Button>
+                                                              </DropdownMenuTrigger>
+                                                              <DropdownMenuContent align="end">
+                                                                  <DropdownMenuLabel>Atribuir a:</DropdownMenuLabel>
+                                                                  {user?.canBeAssigned !== false && (
+                                                                      <DropdownMenuItem onClick={() => handleAssignToMe(order)}>
+                                                                          Atribuir a mim
+                                                                      </DropdownMenuItem>
+                                                                  )}
+                                                                  {user?.canBeAssigned !== false && assignableSellers.length > 0 && <Separator />}
+                                                                  {assignableSellers.length > 0 ? (
+                                                                      assignableSellers.map(s => (
+                                                                          <DropdownMenuItem key={s.id} onClick={() => handleAssignSeller(order, s)}>
+                                                                              {s.name}
+                                                                          </DropdownMenuItem>
+                                                                      ))
+                                                                  ) : (
+                                                                      <DropdownMenuItem disabled>Nenhum vendedor disponível</DropdownMenuItem>
+                                                                  )}
+                                                              </DropdownMenuContent>
+                                                          </DropdownMenu>
                                                           <DropdownMenu>
                                                               <DropdownMenuTrigger asChild>
                                                                   <Button variant="ghost" size="icon" className="h-8 w-8">
@@ -743,17 +765,6 @@ Não esqueça de enviar o comprovante!`;
                                                                       <Trash className="mr-2 h-4 w-4" />
                                                                       Mover para Lixeira
                                                                   </DropdownMenuItem>
-                                                                  <Separator />
-                                                                  <DropdownMenuLabel>Atribuir a:</DropdownMenuLabel>
-                                                                  {assignableSellers.length > 0 ? (
-                                                                      assignableSellers.map(s => (
-                                                                          <DropdownMenuItem key={s.id} onClick={() => handleAssignSeller(order, s)}>
-                                                                              {s.name}
-                                                                          </DropdownMenuItem>
-                                                                      ))
-                                                                  ) : (
-                                                                      <DropdownMenuItem disabled>Nenhum vendedor disponível</DropdownMenuItem>
-                                                                  )}
                                                               </DropdownMenuContent>
                                                           </DropdownMenu>
                                                       </div>
