@@ -189,7 +189,8 @@ export default function OrdersAdminPage() {
         const searchTerm = filters.search.toLowerCase();
         const searchMatch = !searchTerm ||
             o.id.toLowerCase().includes(searchTerm) ||
-            o.customer.name.toLowerCase().includes(searchTerm);
+            o.customer.name.toLowerCase().includes(searchTerm) ||
+            (o.customer.code || '').toLowerCase().includes(searchTerm);
 
         const statusMatch = filters.status === 'all' || o.status === filters.status;
         
@@ -211,9 +212,10 @@ export default function OrdersAdminPage() {
 
         const isOverdue = (o.installmentDetails || []).some(inst => inst.status === 'Pendente' && new Date(inst.dueDate) < new Date());
         const hasPendingInstallments = (o.installmentDetails || []).some(inst => inst.status === 'Pendente');
+        const isPaidOff = (o.installmentDetails || []).length > 0 && (o.installmentDetails || []).every(inst => inst.status === 'Pago');
 
         const overdueMatch = !filters.showOverdue || isOverdue;
-        const onTimeMatch = !filters.showOnTime || (hasPendingInstallments && !isOverdue);
+        const onTimeMatch = !filters.showOnTime || (!isOverdue && (hasPendingInstallments || isPaidOff));
         
         const dueDateMatch = filters.dueDateRange === 'all' || (o.installmentDetails || []).some(inst => {
             if (inst.status !== 'Pendente') return false;
@@ -546,7 +548,7 @@ Não esqueça de enviar o comprovante!`;
                       <div className="flex flex-wrap gap-4 mb-6 p-4 border rounded-lg bg-muted/50">
                           <div className="flex-grow min-w-[200px]">
                               <Input 
-                                  placeholder="Buscar por ID ou cliente..."
+                                  placeholder="Buscar por ID, cliente ou código..."
                                   value={filters.search}
                                   onChange={(e) => handleFilterChange('search', e.target.value)}
                               />
@@ -572,7 +574,7 @@ Não esqueça de enviar o comprovante!`;
                                   </SelectTrigger>
                                   <SelectContent>
                                       <SelectItem value="all">Todos os Vendedores</SelectItem>
-                                      {sellersForFilter.map(s => (
+                                      {assignableSellers.map(s => (
                                           <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>
                                       ))}
                                   </SelectContent>
@@ -665,6 +667,7 @@ Não esqueça de enviar o comprovante!`;
                                                 .sort((a, b) => new Date(a.dueDate).getTime() - new Date(b.dueDate).getTime())[0];
                                           const installmentForReminder = nextPendingInstallment || order.installmentDetails?.[0];
                                           const isOverdue = !!nextPendingInstallment && new Date(nextPendingInstallment.dueDate) < new Date();
+                                          const isPaidOff = (order.installmentDetails || []).length > 0 && (order.installmentDetails || []).every(inst => inst.status === 'Pago');
                                           
                                           return (
                                               <TableRow key={order.id} className="text-sm">
@@ -694,8 +697,8 @@ Não esqueça de enviar o comprovante!`;
                                                   </TableCell>
                                                   <TableCell className="p-2 text-xs truncate max-w-[150px]">{order.items.map(item => item.name).join(', ')}</TableCell>
                                                   <TableCell className="p-2 truncate max-w-[120px]">{order.sellerName}</TableCell>
-                                                  <TableCell className={cn("p-2 whitespace-nowrap", isOverdue && "text-destructive font-semibold")}>
-                                                      {nextPendingInstallment ? format(new Date(nextPendingInstallment.dueDate), 'dd/MM/yy') : '-'}
+                                                  <TableCell className={cn("p-2 whitespace-nowrap", isOverdue && "text-destructive font-semibold", isPaidOff && !nextPendingInstallment && "text-green-600 font-semibold")}>
+                                                      {nextPendingInstallment ? format(new Date(nextPendingInstallment.dueDate), 'dd/MM/yy') : (isPaidOff ? 'Quitado' : '-')}
                                                   </TableCell>
                                                   <TableCell className="p-2 text-right font-semibold">{formatCurrency(order.total)}</TableCell>
                                                   <TableCell className="p-2 text-right font-semibold">
@@ -712,11 +715,15 @@ Não esqueça de enviar o comprovante!`;
                                                               <Badge variant="destructive" className="flex items-center gap-1">
                                                                   <Clock className="h-3 w-3" /> Atrasado
                                                               </Badge>
-                                                          ) : (nextPendingInstallment && (
-                                                               <Badge variant="default" className="bg-green-600 hover:bg-green-700 flex items-center gap-1">
+                                                          ) : (nextPendingInstallment ? (
+                                                              <Badge variant="default" className="bg-green-600 hover:bg-green-700 flex items-center gap-1">
                                                                   <CheckCircle className="h-3 w-3" /> Em dia
                                                               </Badge>
-                                                          ))}
+                                                          ) : (isPaidOff && (
+                                                              <Badge variant="default" className="bg-green-600 hover:bg-green-700 flex items-center gap-1">
+                                                                  <CheckCircle className="h-3 w-3" /> Quitado
+                                                              </Badge>
+                                                          )))}
                                                       </div>
                                                   </TableCell>
                                                   <TableCell className="p-2 text-right">
@@ -801,7 +808,7 @@ Não esqueça de enviar o comprovante!`;
                       <div className="flex flex-wrap gap-4 mb-6 p-4 border rounded-lg bg-muted/50">
                           <div className="flex-grow min-w-[200px]">
                               <Input
-                                  placeholder="Buscar na lixeira por ID ou cliente..."
+                                  placeholder="Buscar na lixeira por ID, cliente ou código..."
                                   value={filters.search}
                                   onChange={(e) => handleFilterChange('search', e.target.value)}
                               />
