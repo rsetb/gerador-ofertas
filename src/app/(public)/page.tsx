@@ -141,7 +141,16 @@ export default function Home() {
               >
                 <CarouselContent>
                   {saleProducts.map((product) => (
-                    <CarouselItem key={product.id} className="md:basis-1/2 lg:basis-1/3">
+                    <CarouselItem
+                      key={product.id}
+                      className={
+                        saleProducts.length === 1
+                          ? 'basis-full'
+                          : saleProducts.length === 2
+                            ? 'md:basis-1/2 lg:basis-1/2'
+                            : 'md:basis-1/2 lg:basis-1/3'
+                      }
+                    >
                       <div className="p-1 h-full">
                         <Link href={`/produtos/${product.id}`} className="block h-full">
                           <Card className="h-full overflow-hidden flex flex-col md:flex-row justify-between transition-all duration-300 hover:shadow-xl hover:-translate-y-1">

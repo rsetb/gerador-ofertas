@@ -45,9 +45,10 @@ function isValidCPF(cpf: string) {
 const checkoutSchema = z.object({
   code: z.string().optional(),
   name: z.string().min(3, 'Nome completo é obrigatório.'),
-  cpf: z.string().refine(isValidCPF, {
-    message: 'CPF inválido.',
-  }),
+  cpf: z
+    .string()
+    .min(1, 'CPF é obrigatório.')
+    .refine(isValidCPF, { message: 'CPF inválido.' }),
   phone: z.string().refine((val) => {
     const len = onlyDigits(val).length;
     return len >= 10 && len <= 11;
@@ -61,11 +62,11 @@ const checkoutSchema = z.object({
   }, 'CEP inválido. Deve conter 8 dígitos.'),
   address: z.string().min(3, 'Endereço é obrigatório.'),
   number: z.string().min(1, 'Número é obrigatório.'),
-  complement: z.string().optional(),
+  complement: z.string().min(1, 'Complemento é obrigatório.'),
   neighborhood: z.string().min(2, 'Bairro é obrigatório.'),
   city: z.string().min(2, 'Cidade é obrigatória.'),
   state: z.string().min(2, 'Estado é obrigatória.'),
-  observations: z.string().optional(),
+  observations: z.string().min(1, 'Observações são obrigatórias.'),
   sellerId: z.string().optional(),
   sellerName: z.string().optional(),
 });
@@ -379,7 +380,7 @@ export default function CheckoutForm() {
                         name="cpf" 
                         render={({ field }) => ( 
                             <FormItem>
-                                <FormLabel>CPF</FormLabel>
+                                <FormLabel>CPF <span className="text-destructive">*</span></FormLabel>
                                 <FormControl>
                                     <Input 
                                         placeholder="000.000.000-00" 
@@ -406,7 +407,7 @@ export default function CheckoutForm() {
                             </FormItem>
                         )}
                     />
-                    <FormField control={form.control} name="name" render={({ field }) => ( <FormItem><FormLabel>Nome Completo</FormLabel><FormControl><Input {...field} /></FormControl><FormMessage /></FormItem> )} />
+                    <FormField control={form.control} name="name" render={({ field }) => ( <FormItem><FormLabel>Nome Completo <span className="text-destructive">*</span></FormLabel><FormControl><Input {...field} /></FormControl><FormMessage /></FormItem> )} />
                     {sellerName && (
                         <div className="md:col-span-2">
                             <FormLabel>Vendedor Responsável</FormLabel>
@@ -416,7 +417,7 @@ export default function CheckoutForm() {
                             </div>
                         </div>
                     )}
-                    <FormField control={form.control} name="phone" render={({ field }) => ( <FormItem><FormLabel>Telefone (WhatsApp)</FormLabel><FormControl><Input placeholder="(99) 99999-9999" {...field} onChange={e => field.onChange(maskPhone(e.target.value))} inputMode="tel" maxLength={15} /></FormControl><FormMessage /></FormItem> )} />
+                    <FormField control={form.control} name="phone" render={({ field }) => ( <FormItem><FormLabel>Telefone (WhatsApp) <span className="text-destructive">*</span></FormLabel><FormControl><Input placeholder="(99) 99999-9999" {...field} onChange={e => field.onChange(maskPhone(e.target.value))} inputMode="tel" maxLength={15} /></FormControl><FormMessage /></FormItem> )} />
                     <FormField control={form.control} name="phone2" render={({ field }) => ( <FormItem><FormLabel>Telefone 2 (Opcional)</FormLabel><FormControl><Input placeholder="(99) 99999-9999" {...field} onChange={e => field.onChange(maskPhone(e.target.value))} inputMode="tel" maxLength={15} /></FormControl><FormMessage /></FormItem> )} />
                     <FormField control={form.control} name="phone3" render={({ field }) => ( <FormItem><FormLabel>Telefone 3 (Opcional)</FormLabel><FormControl><Input placeholder="(99) 99999-9999" {...field} onChange={e => field.onChange(maskPhone(e.target.value))} inputMode="tel" maxLength={15} /></FormControl><FormMessage /></FormItem> )} />
                     <FormField control={form.control} name="email" render={({ field }) => ( <FormItem className="md:col-span-2"><FormLabel>Email (Opcional)</FormLabel><FormControl><Input placeholder="seu@email.com" {...field} /></FormControl><FormMessage /></FormItem> )} />
@@ -429,20 +430,20 @@ export default function CheckoutForm() {
                 )}
                 <h4 className="text-lg font-semibold pt-4">Endereço de Entrega</h4>
                 <div className="grid grid-cols-1 md:grid-cols-6 gap-4">
-                    <FormField control={form.control} name="zip" render={({ field }) => ( <FormItem className="md:col-span-2"><FormLabel>CEP</FormLabel><FormControl><Input placeholder="00000-000" {...field} onBlur={handleZipBlur} /></FormControl><FormMessage /></FormItem> )} />
-                    <FormField control={form.control} name="address" render={({ field }) => ( <FormItem className="md:col-span-4"><FormLabel>Endereço</FormLabel><FormControl><Input placeholder="Rua, Av." {...field} /></FormControl><FormMessage /></FormItem> )} />
-                    <FormField control={form.control} name="number" render={({ field }) => ( <FormItem className="md:col-span-2"><FormLabel>Número</FormLabel><FormControl><Input placeholder="123" {...field} /></FormControl><FormMessage /></FormItem> )} />
-                    <FormField control={form.control} name="complement" render={({ field }) => ( <FormItem className="md:col-span-4"><FormLabel>Complemento (opcional)</FormLabel><FormControl><Input placeholder="Apto, bloco, casa, etc." {...field} /></FormControl><FormMessage /></FormItem> )} />
-                    <FormField control={form.control} name="neighborhood" render={({ field }) => ( <FormItem className="md:col-span-3"><FormLabel>Bairro</FormLabel><FormControl><Input {...field} /></FormControl><FormMessage /></FormItem> )} />
-                    <FormField control={form.control} name="city" render={({ field }) => ( <FormItem className="md:col-span-3"><FormLabel>Cidade</FormLabel><FormControl><Input {...field} /></FormControl><FormMessage /></FormItem> )} />
-                    <FormField control={form.control} name="state" render={({ field }) => ( <FormItem className="md:col-span-6"><FormLabel>Estado</FormLabel><FormControl><Input {...field} /></FormControl><FormMessage /></FormItem> )} />
+                    <FormField control={form.control} name="zip" render={({ field }) => ( <FormItem className="md:col-span-2"><FormLabel>CEP <span className="text-destructive">*</span></FormLabel><FormControl><Input placeholder="00000-000" {...field} onBlur={handleZipBlur} /></FormControl><FormMessage /></FormItem> )} />
+                    <FormField control={form.control} name="address" render={({ field }) => ( <FormItem className="md:col-span-4"><FormLabel>Endereço <span className="text-destructive">*</span></FormLabel><FormControl><Input placeholder="Rua, Av." {...field} /></FormControl><FormMessage /></FormItem> )} />
+                    <FormField control={form.control} name="number" render={({ field }) => ( <FormItem className="md:col-span-2"><FormLabel>Número <span className="text-destructive">*</span></FormLabel><FormControl><Input placeholder="123" {...field} /></FormControl><FormMessage /></FormItem> )} />
+                    <FormField control={form.control} name="complement" render={({ field }) => ( <FormItem className="md:col-span-4"><FormLabel>Complemento <span className="text-destructive">*</span></FormLabel><FormControl><Input placeholder="Apto, bloco, casa, etc." {...field} /></FormControl><FormMessage /></FormItem> )} />
+                    <FormField control={form.control} name="neighborhood" render={({ field }) => ( <FormItem className="md:col-span-3"><FormLabel>Bairro <span className="text-destructive">*</span></FormLabel><FormControl><Input {...field} /></FormControl><FormMessage /></FormItem> )} />
+                    <FormField control={form.control} name="city" render={({ field }) => ( <FormItem className="md:col-span-3"><FormLabel>Cidade <span className="text-destructive">*</span></FormLabel><FormControl><Input {...field} /></FormControl><FormMessage /></FormItem> )} />
+                    <FormField control={form.control} name="state" render={({ field }) => ( <FormItem className="md:col-span-6"><FormLabel>Estado <span className="text-destructive">*</span></FormLabel><FormControl><Input {...field} /></FormControl><FormMessage /></FormItem> )} />
                 </div>
                  <FormField
                     control={form.control}
                     name="observations"
                     render={({ field }) => (
                         <FormItem>
-                            <FormLabel>Observações (Opcional)</FormLabel>
+                            <FormLabel>Observações <span className="text-destructive">*</span></FormLabel>
                             <FormControl>
                                 <Textarea placeholder="Ex: Deixar na portaria, ponto de referência..." {...field} />
                             </FormControl>
