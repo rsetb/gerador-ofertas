@@ -121,8 +121,11 @@ export default function ManageUsersPage() {
             dataToUpdate.password = values.password;
         }
 
-        await updateUser(userToEdit.id, dataToUpdate);
-        setIsEditDialogOpen(false);
+        try {
+            await updateUser(userToEdit.id, dataToUpdate);
+            setIsEditDialogOpen(false);
+        } catch {
+        }
     };
 
     const handleCreateUser = async (values: z.infer<typeof userCreateFormSchema>) => {
@@ -199,7 +202,7 @@ export default function ManageUsersPage() {
                                                         </AlertDialogHeader>
                                                         <AlertDialogFooter>
                                                             <AlertDialogCancel>Cancelar</AlertDialogCancel>
-                                                            <AlertDialogAction onClick={() => deleteUser(user.id)}>
+                                                            <AlertDialogAction onClick={() => { deleteUser(user.id).catch(() => {}); }}>
                                                                 Sim, Excluir
                                                             </AlertDialogAction>
                                                         </AlertDialogFooter>

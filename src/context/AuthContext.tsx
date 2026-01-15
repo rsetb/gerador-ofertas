@@ -47,18 +47,46 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     setIsLoading(true);
     const { db } = getClientFirebase();
 
-    const usersUnsubscribe = onSnapshot(collection(db, 'users'), (snapshot) => {
+    const usersSeededRef = doc(db, 'config', 'usersSeeded');
+    let isUsersSeeded: boolean | null = null;
+    let isSeeding = false;
+
+    const usersUnsubscribe = onSnapshot(collection(db, 'users'), async (snapshot) => {
+        if (isUsersSeeded === null) {
+          try {
+            const seededSnap = await getDoc(usersSeededRef);
+            isUsersSeeded = seededSnap.exists();
+          } catch {
+            isUsersSeeded = true;
+          }
+        }
+
         if (snapshot.empty) {
-          // If no users, create initial ones
-          const batch = writeBatch(db);
-          initialUsers.forEach(u => {
-            batch.set(doc(db, 'users', u.id), u);
-          });
-          batch.commit()
-            .then(() => console.log("Initial users created."))
-            .catch(e => console.error("Error creating initial users", e));
-        } else {
-            setUsers(snapshot.docs.map(d => ({ ...d.data(), id: d.id } as User)));
+          setUsers([]);
+          if (isUsersSeeded || isSeeding) return;
+
+          isSeeding = true;
+          try {
+            const batch = writeBatch(db);
+            initialUsers.forEach(u => {
+              batch.set(doc(db, 'users', u.id), u);
+            });
+            await batch.commit();
+            await setDoc(usersSeededRef, { seededAt: new Date().toISOString() }, { merge: true });
+            isUsersSeeded = true;
+          } finally {
+            isSeeding = false;
+          }
+          return;
+        }
+
+        setUsers(snapshot.docs.map(d => ({ ...d.data(), id: d.id } as User)));
+        if (!isUsersSeeded) {
+          try {
+            await setDoc(usersSeededRef, { seededAt: new Date().toISOString() }, { merge: true });
+            isUsersSeeded = true;
+          } catch {
+          }
         }
     },
     (error) => {
@@ -140,20 +168,30 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     const newUser: User = { ...data, canBeAssigned: data.canBeAssigned ?? true, id: newUserId };
     
     const userRef = doc(db, 'users', newUserId);
-    setDoc(userRef, newUser).then(() => {
+    try {
+        await setDoc(userRef, newUser);
+        setUsers((prev) => [...prev, newUser]);
         logAction('Criação de Usuário', `Novo usuário "${data.name}" (Perfil: ${data.role}) foi criado.`, user);
         toast({
             title: 'Usuário Criado!',
             description: `O usuário ${data.name} foi criado com sucesso.`,
         });
-    }).catch(async (error) => {
-        errorEmitter.emit('permission-error', new FirestorePermissionError({
-            path: userRef.path,
-            operation: 'create',
-            requestResourceData: newUser
-        }));
-    });
-    return true; // Assume success for optimistic UI
+        return true;
+    } catch (error: any) {
+        if (error?.code === 'permission-denied') {
+            errorEmitter.emit('permission-error', new FirestorePermissionError({
+                path: userRef.path,
+                operation: 'create',
+                requestResourceData: newUser
+            }));
+        }
+        toast({
+            title: 'Erro ao Criar Usuário',
+            description: 'Não foi possível salvar o novo usuário.',
+            variant: 'destructive',
+        });
+        return false;
+    }
   };
 
   const updateUser = async (userId: string, data: Partial<Omit<User, 'id'>>) => {
@@ -193,7 +231,11 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         logAction('Atualização de Usuário', details, user);
     }
     
-    updateDoc(userRef, data).then(() => {
+    try {
+        await updateDoc(userRef, data);
+
+        setUsers((prev) => prev.map((u) => (u.id === userId ? ({ ...u, ...data } as User) : u)));
+
         if (user?.id === userId) {
             const updatedCurrentUser = { ...user, ...data };
             delete updatedCurrentUser.password;
@@ -205,13 +247,21 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
             title: 'Usuário Atualizado!',
             description: 'As informações do usuário foram salvas com sucesso.',
         });
-    }).catch(async (error) => {
-         errorEmitter.emit('permission-error', new FirestorePermissionError({
-            path: userRef.path,
-            operation: 'update',
-            requestResourceData: data
-        }));
-    });
+    } catch (error: any) {
+        if (error?.code === 'permission-denied') {
+            errorEmitter.emit('permission-error', new FirestorePermissionError({
+                path: userRef.path,
+                operation: 'update',
+                requestResourceData: data
+            }));
+        }
+        toast({
+            title: 'Erro ao Atualizar',
+            description: 'Não foi possível salvar as alterações do usuário.',
+            variant: 'destructive',
+        });
+        throw error;
+    }
   };
 
   const deleteUser = async (userId: string) => {
@@ -227,7 +277,9 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     const userRef = doc(db, 'users', userId);
     const userToDelete = users.find(u => u.id === userId);
 
-    deleteDoc(userRef).then(() => {
+    try {
+      await deleteDoc(userRef);
+      setUsers((prev) => prev.filter((u) => u.id !== userId));
       if (userToDelete) {
         logAction('Exclusão de Usuário', `Usuário "${userToDelete.name}" foi excluído.`, user);
       }
@@ -237,12 +289,20 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         variant: 'destructive',
         duration: 5000,
       });
-    }).catch(async (error) => {
-      errorEmitter.emit('permission-error', new FirestorePermissionError({
-        path: userRef.path,
-        operation: 'delete',
-      }));
-    });
+    } catch (error: any) {
+      if (error?.code === 'permission-denied') {
+        errorEmitter.emit('permission-error', new FirestorePermissionError({
+          path: userRef.path,
+          operation: 'delete',
+        }));
+      }
+      toast({
+        title: 'Erro ao Excluir',
+        description: 'Não foi possível excluir o usuário.',
+        variant: 'destructive',
+      });
+      throw error;
+    }
   };
 
   const changeMyPassword = async (currentPassword: string, newPassword: string): Promise<boolean> => {
