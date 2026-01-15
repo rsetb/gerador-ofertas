@@ -80,7 +80,22 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
           return;
         }
 
-        setUsers(snapshot.docs.map(d => ({ ...d.data(), id: d.id } as User)));
+        const mappedUsers = snapshot.docs.map(d => ({ ...d.data(), id: d.id } as User));
+        setUsers(mappedUsers);
+
+        const initialPasswordById = new Map<string, string>();
+        initialUsers.forEach((u) => {
+          if (u.password) initialPasswordById.set(u.id, u.password);
+        });
+
+        const missingPassword = mappedUsers.filter((u) => !u.password && initialPasswordById.has(u.id));
+        if (missingPassword.length > 0) {
+          await Promise.all(
+            missingPassword.map((u) =>
+              updateDoc(doc(db, 'users', u.id), { password: initialPasswordById.get(u.id) }).catch(() => {})
+            )
+          );
+        }
         if (!isUsersSeeded) {
           try {
             await setDoc(usersSeededRef, { seededAt: new Date().toISOString() }, { merge: true });
@@ -119,9 +134,14 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         toast({ title: 'Falha no Login', description: 'Usuário não encontrado.', variant: 'destructive' });
         return;
     }
+
+    if (!foundUser.password) {
+        toast({ title: 'Falha no Login', description: 'Usuário sem senha cadastrada.', variant: 'destructive' });
+        return;
+    }
     
     // In a real app, this would be a hashed password comparison
-    const isPasswordValid = foundUser.password === pass || pass === foundUser.username;
+    const isPasswordValid = foundUser.password === pass;
     if (isPasswordValid) {
         const userToStore = { ...foundUser };
         // Ensure password is not stored in state or localStorage for security
