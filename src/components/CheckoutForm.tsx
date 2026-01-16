@@ -21,18 +21,18 @@ import { useEffect, useMemo, useState, useCallback } from 'react';
 import Image from 'next/image';
 import { Separator } from '@/components/ui/separator';
 import { useToast } from '@/hooks/use-toast';
-import type { Order, CustomerInfo, PaymentMethod } from '@/lib/types';
+import type { Order, CustomerInfo, PaymentMethod, Product } from '@/lib/types';
 import { addMonths } from 'date-fns';
 import { AlertTriangle, CreditCard, KeyRound, Trash2, ArrowLeft, User } from 'lucide-react';
 import { useSettings } from '@/context/SettingsContext';
-import { useAdmin, useAdminData } from '@/context/AdminContext';
-import { useAuth } from '@/context/AuthContext';
-import { useAudit } from '@/context/AuditContext';
 import { useData } from '@/context/DataContext';
 import { Textarea } from './ui/textarea';
 import Link from 'next/link';
 import { maskCpf, maskPhone, onlyDigits } from '@/lib/utils';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { getClientFirebase } from '@/lib/firebase-client';
+import { allocateNextCustomerCode } from '@/lib/customer-code';
+import { doc, getDoc, runTransaction } from 'firebase/firestore';
 
 function isValidCPF(cpf: string) {
     if (typeof cpf !== 'string') return false;
@@ -78,19 +78,56 @@ const formatCurrency = (value: number) => {
   return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(value);
 };
 
+const calculateCommission = (order: Order, allProducts: Product[]) => {
+  if (order.isCommissionManual && typeof order.commission === 'number') {
+    return order.commission;
+  }
+
+  if (!order.sellerId) {
+    return 0;
+  }
+
+  const fallbackPercentage = 5;
+
+  return order.items.reduce((totalCommission, item) => {
+    const product = allProducts.find(p => p.id === item.id);
+    const hasExplicitCommissionValue =
+      product && typeof product.commissionValue === 'number' && !Number.isNaN(product.commissionValue);
+
+    const commissionType = hasExplicitCommissionValue ? (product!.commissionType || 'percentage') : 'percentage';
+    const commissionValue = hasExplicitCommissionValue ? product!.commissionValue! : fallbackPercentage;
+
+    if (commissionType === 'fixed') {
+      return totalCommission + (commissionValue * item.quantity);
+    }
+
+    if (commissionType === 'percentage') {
+      const itemTotal = item.price * item.quantity;
+      return totalCommission + (itemTotal * (commissionValue / 100));
+    }
+
+    return totalCommission;
+  }, 0);
+};
+
+function sanitizeCustomerForFirestore(customer: CustomerInfo): Record<string, any> {
+  const obj: Record<string, any> = {};
+  Object.entries(customer).forEach(([key, value]) => {
+    if (value !== undefined) obj[key] = value;
+  });
+  if (obj.password === undefined || obj.password === '') {
+    delete obj.password;
+  }
+  return obj;
+}
+
 export default function CheckoutForm() {
   const { cartItems, getCartTotal, clearCart, setLastOrder, removeFromCart } = useCart();
   const { settings } = useSettings();
-  const { addOrder } = useAdmin();
-  const { customers, deletedCustomers } = useAdminData();
   const { products } = useData();
-  const { user } = useAuth();
-  const { logAction } = useAudit();
   const router = useRouter();
   const { toast } = useToast();
   const [isNewCustomer, setIsNewCustomer] = useState(true);
-  
-  const allKnownCustomers = useMemo(() => [...customers, ...deletedCustomers], [customers, deletedCustomers]);
   
   const form = useForm<z.infer<typeof checkoutSchema>>({
     resolver: zodResolver(checkoutSchema),
@@ -126,27 +163,50 @@ export default function CheckoutForm() {
 
     const cpfDigits = onlyDigits(maskedValue);
     if (cpfDigits.length === 11 && isValidCPF(maskedValue)) {
-        const existingCustomer = allKnownCustomers.find(c => onlyDigits(c.cpf || '') === cpfDigits);
-        if (existingCustomer) {
+      void (async () => {
+        try {
+          const { db } = getClientFirebase();
+          const customerRef = doc(db, 'customers', cpfDigits);
+          const customerSnap = await getDoc(customerRef);
+
+          let existingCustomer: CustomerInfo | null = customerSnap.exists()
+            ? ({ cpf: cpfDigits, ...(customerSnap.data() as CustomerInfo) } as CustomerInfo)
+            : null;
+
+          if (!existingCustomer) {
+            const trashRef = doc(db, 'customersTrash', cpfDigits);
+            const trashSnap = await getDoc(trashRef);
+            if (trashSnap.exists()) {
+              existingCustomer = ({ cpf: cpfDigits, ...(trashSnap.data() as CustomerInfo) } as CustomerInfo);
+            }
+          }
+
+          if (existingCustomer) {
             form.reset({
-                ...existingCustomer,
-                cpf: existingCustomer.cpf, // ensure formatted cpf is kept if it was
-                code: existingCustomer.code || '',
+              ...existingCustomer,
+              cpf: existingCustomer.cpf || maskedValue,
+              code: existingCustomer.code || '',
             });
             setIsNewCustomer(false);
             toast({
-                title: "Cliente Encontrado!",
-                description: "Seus dados foram preenchidos automaticamente.",
+              title: "Cliente Encontrado!",
+              description: "Seus dados foram preenchidos automaticamente.",
             });
-        } else {
+          } else {
             setIsNewCustomer(true);
             form.setValue('code', '');
-            // Clear seller fields if customer is not found
             form.setValue('sellerId', undefined);
             form.setValue('sellerName', undefined);
+          }
+        } catch {
+          setIsNewCustomer(true);
+          form.setValue('code', '');
+          form.setValue('sellerId', undefined);
+          form.setValue('sellerName', undefined);
         }
+      })();
     }
-  }, [allKnownCustomers, form, toast]);
+  }, [form, toast]);
 
 
   const cartItemsWithDetails = useMemo(() => {
@@ -268,7 +328,59 @@ export default function CheckoutForm() {
     };
     
     try {
-        const savedOrder = await addOrder(order, logAction, user);
+        const { db } = getClientFirebase();
+        const prefix = order.items && order.items.length > 0 ? 'PED' : 'REG';
+        const orderId = `${prefix}-${Date.now().toString().slice(-6)}`;
+
+        const cpfDigits = onlyDigits(customerData.cpf || '');
+        let code = (customerData.code || '').trim();
+
+        if (!code) {
+          const customerRef = cpfDigits.length === 11 ? doc(db, 'customers', cpfDigits) : null;
+          const snap = customerRef ? await getDoc(customerRef) : null;
+          const fromDoc = snap?.exists() ? String((snap.data() as any)?.code || '') : '';
+          code = fromDoc.trim() || (await allocateNextCustomerCode(db));
+        }
+
+        const orderToSave: Order = {
+          ...(order as any),
+          id: orderId,
+          customer: {
+            ...customerData,
+            code,
+          },
+          sellerId: order.sellerId || '',
+          sellerName: order.sellerName || 'Não atribuído',
+          commissionPaid: false,
+          createdAt: new Date().toISOString(),
+          createdById: '',
+          createdByName: customerData.name || '',
+          createdByRole: 'cliente',
+          commission: 0,
+        };
+
+        orderToSave.commission = calculateCommission(orderToSave, products);
+
+        const orderRef = doc(db, 'orders', orderId);
+
+        await runTransaction(db, async (tx) => {
+          for (const item of orderToSave.items) {
+            const productRef = doc(db, 'products', item.id);
+            const productSnap = await tx.get(productRef);
+            if (!productSnap.exists()) {
+              throw new Error('Produto não encontrado.');
+            }
+            const currentStock = Number((productSnap.data() as any)?.stock ?? 0);
+            if (!Number.isFinite(currentStock) || currentStock < item.quantity) {
+              throw new Error('Estoque insuficiente para um ou mais produtos.');
+            }
+            tx.update(productRef, { stock: currentStock - item.quantity });
+          }
+
+          tx.set(orderRef, { ...orderToSave, customer: sanitizeCustomerForFirestore(orderToSave.customer) });
+        });
+
+        const savedOrder = orderToSave;
         if (savedOrder) {
           setLastOrder(savedOrder);
       

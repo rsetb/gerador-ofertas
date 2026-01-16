@@ -46,12 +46,17 @@ function StockAuditTab() {
     const { products } = useData();
     const { stockAudits } = useAdminData();
     const { settings } = useSettings();
-    const { user } = useAuth();
+    const { user, isLoading } = useAuth();
     const { logAction } = useAudit();
     const router = useRouter();
+    const [mounted, setMounted] = useState(false);
     const [stockCounts, setStockCounts] = useState<StockCount>({});
     const [mes, setMes] = useState((new Date().getMonth() + 1).toString().padStart(2, '0'));
     const [ano, setAno] = useState(new Date().getFullYear().toString());
+
+    useEffect(() => {
+        setMounted(true);
+    }, []);
 
     useEffect(() => {
         const auditId = `audit-${ano}-${mes}`;
@@ -70,9 +75,26 @@ function StockAuditTab() {
         }
     }, [mes, ano, stockAudits]);
 
+    useEffect(() => {
+        if (!mounted || isLoading) return;
+        if (!user) {
+            router.push('/login');
+            return;
+        }
+        if (user.role !== 'admin' && user.role !== 'gerente') {
+            router.push('/admin/pedidos');
+        }
+    }, [mounted, isLoading, user, router]);
 
-     if (user?.role !== 'admin' && user?.role !== 'gerente') {
-        router.push('/admin/pedidos');
+    if (!mounted || isLoading) {
+        return <p>Carregando painel...</p>;
+    }
+
+    if (!user) {
+        return <p>Redirecionando...</p>;
+    }
+
+    if (user.role !== 'admin' && user.role !== 'gerente') {
         return <p>Acesso negado. Redirecionando...</p>;
     }
 
