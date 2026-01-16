@@ -44,6 +44,7 @@
     "dotenv": "^16.4.5",
     "embla-carousel-react": "^8.1.7",
     "firebase": "^10.12.4",
+    "firebase-admin": "^13.6.0",
     "framer-motion": "^11.3.19",
     "genkit": "^1.13.0",
     "html2canvas": "^1.4.1",

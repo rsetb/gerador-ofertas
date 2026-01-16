@@ -4,7 +4,7 @@
 
 import { useParams, useRouter } from 'next/navigation';
 import { useMemo, useRef, useState, useEffect }from 'react';
-import type { Order, Installment, StoreSettings, Payment } from '@/lib/types';
+import type { Order, Installment, StoreSettings } from '@/lib/types';
 import { Button } from '@/components/ui/button';
 import { Printer, Send, ArrowLeft } from 'lucide-react';
 import { format, parseISO } from 'date-fns';
@@ -86,16 +86,25 @@ const ReceiptContent = ({ order, installment, settings, via }: { order: Order; i
     const remainingBalance = isPaid ? 0 : installment.amount - totalPaidOnInstallment;
     const isOrderPaidOff = useMemo(() => {
         const installmentsPaid = (order.installmentDetails || []).every((inst) => inst.status === 'Pago');
-        const immediatePaid = !!order.paymentMethod && ['Pix', 'Dinheiro'].includes(order.paymentMethod);
+        const isLegacyPix = order.paymentMethod === 'Pix' && !order.asaas?.paymentId;
+        const immediatePaid =
+          order.paymentMethod === 'Dinheiro' ||
+          (order.paymentMethod === 'Pix' && (isLegacyPix || !!order.asaas?.paidAt));
         return installmentsPaid || immediatePaid;
-    }, [order.installmentDetails, order.paymentMethod]);
+    }, [order.installmentDetails, order.paymentMethod, order.asaas?.paidAt, order.asaas?.paymentId]);
     
     const valorOriginal = useMemo(() => {
         const subtotal = order.items.reduce((acc, item) => acc + (item.price * item.quantity), 0);
         return subtotal;
     }, [order.items]);
     
-    const valorFinanciado = order.total;
+    const entrada = order.downPayment || 0;
+    const totalPedido = useMemo(() => Math.max(0, valorOriginal - (order.discount || 0)), [valorOriginal, order.discount]);
+    const valorFinanciado = useMemo(() => {
+        const financedFromInstallments = (order.installmentDetails || []).reduce((sum, inst) => sum + (inst.amount || 0), 0);
+        if (financedFromInstallments > 0) return financedFromInstallments;
+        return Math.max(0, totalPedido - entrada);
+    }, [order.installmentDetails, totalPedido, entrada]);
 
     return (
         <div className="bg-white break-inside-avoid-page text-black font-mono text-xs relative print:p-0">
@@ -132,6 +141,7 @@ const ReceiptContent = ({ order, installment, settings, via }: { order: Order; i
                     <p className="receipt-main-values text-base font-semibold">VALOR ORIGINAL: {formatCurrency(valorOriginal)}</p>
                     {(order.downPayment || 0) > 0 && <p>ENTRADA: -{formatCurrency(order.downPayment || 0)}</p>}
                     {(order.discount || 0) > 0 && <p>DESCONTO: -{formatCurrency(order.discount || 0)}</p>}
+                    <p className="receipt-main-values text-base font-semibold">VALOR DO PEDIDO: {formatCurrency(totalPedido)}</p>
                     <p className="receipt-main-values text-base font-extrabold">VALOR FINANCIADO: {formatCurrency(valorFinanciado)}</p>
                 </div>
             </div>
@@ -228,8 +238,6 @@ export default function SingleInstallmentPage() {
   const [settings, setSettings] = useState<StoreSettings>(initialSettings);
   const [order, setOrder] = useState<Order | null>(null);
   const [isLoading, setIsLoading] = useState(true);
-  const [isCreatingStripeLink, setIsCreatingStripeLink] = useState(false);
-  const [isCreatingMercadoPagoLink, setIsCreatingMercadoPagoLink] = useState(false);
   const receiptRef = useRef<HTMLDivElement>(null);
   const { toast } = useToast();
 
@@ -326,124 +334,6 @@ export default function SingleInstallmentPage() {
     return Math.max(0, amount - paid);
   }, [installment]);
 
-  const stripeEnabled = settings.stripeEnabled === undefined ? true : !!settings.stripeEnabled;
-  const mercadopagoEnabled = settings.mercadopagoEnabled === undefined ? true : !!settings.mercadopagoEnabled;
-
-  const openWhatsAppWithLink = (link: string, provider: 'Stripe' | 'MercadoPago') => {
-    if (!order || !installment) return;
-    const customerName = order.customer.name.split(' ')[0];
-    const phone = order.customer.phone.replace(/\D/g, '');
-    const message = `Olá ${customerName}, segue o link para pagamento da parcela nº ${installment.installmentNumber} (pedido ${order.id}) no valor de ${formatCurrency(remainingBalance)} via ${provider}:\n\n${link}\n\nObrigado!\n*${settings.storeName}*`;
-    const webUrl = `https://wa.me/55${phone}?text=${encodeURIComponent(message)}`;
-    window.open(webUrl, '_blank');
-  };
-
-  const handleCreateStripeLink = async () => {
-    if (!order || !installment) return;
-    if (remainingBalance <= 0) return;
-    setIsCreatingStripeLink(true);
-    try {
-      const currentUrl = new URL(window.location.href);
-      const successUrl = new URL(currentUrl.toString());
-      successUrl.searchParams.set('stripe_success', '1');
-      successUrl.searchParams.set('session_id', '{CHECKOUT_SESSION_ID}');
-      const cancelUrl = new URL(currentUrl.toString());
-      cancelUrl.searchParams.set('stripe_canceled', '1');
-
-      const res = await fetch('/api/stripe/create-checkout-session', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          orderId: order.id,
-          installmentNumber: installment.installmentNumber,
-          items: [
-            {
-              name: `Parcela ${installment.installmentNumber}/${order.installments} - Pedido ${order.id}`,
-              quantity: 1,
-              unitAmount: remainingBalance,
-            },
-          ],
-          customer: { name: order.customer.name, email: order.customer.email },
-          successUrl: successUrl.toString(),
-          cancelUrl: cancelUrl.toString(),
-        }),
-      });
-
-      const data = (await res.json().catch(() => null)) as any;
-      if (!res.ok) {
-        throw new Error(data?.error || 'Erro ao gerar link do Stripe.');
-      }
-
-      const url = String(data?.url || '').trim();
-      if (!url) {
-        throw new Error('Stripe não retornou URL de checkout.');
-      }
-
-      await navigator.clipboard.writeText(url).catch(() => null);
-      openWhatsAppWithLink(url, 'Stripe');
-      toast({ title: 'Link gerado!', description: 'O link foi copiado e o WhatsApp foi aberto.' });
-    } catch (e: any) {
-      toast({ title: 'Erro', description: e?.message || 'Falha ao gerar link.', variant: 'destructive' });
-    } finally {
-      setIsCreatingStripeLink(false);
-    }
-  };
-
-  const handleCreateMercadoPagoLink = async () => {
-    if (!order || !installment) return;
-    if (remainingBalance <= 0) return;
-    setIsCreatingMercadoPagoLink(true);
-    try {
-      const currentUrl = new URL(window.location.href);
-      const success = new URL(currentUrl.toString());
-      success.searchParams.set('mp_success', '1');
-      const pending = new URL(currentUrl.toString());
-      pending.searchParams.set('mp_pending', '1');
-      const failure = new URL(currentUrl.toString());
-      failure.searchParams.set('mp_failure', '1');
-
-      const res = await fetch('/api/mercadopago/create-preference', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          orderId: order.id,
-          installmentNumber: installment.installmentNumber,
-          items: [
-            {
-              title: `Parcela ${installment.installmentNumber}/${order.installments} - Pedido ${order.id}`,
-              quantity: 1,
-              unit_price: remainingBalance,
-            },
-          ],
-          customer: { name: order.customer.name, email: order.customer.email },
-          backUrls: {
-            success: success.toString(),
-            pending: pending.toString(),
-            failure: failure.toString(),
-          },
-        }),
-      });
-
-      const data = (await res.json().catch(() => null)) as any;
-      if (!res.ok) {
-        throw new Error(data?.error || 'Erro ao gerar link do Mercado Pago.');
-      }
-
-      const url = String(data?.init_point || '').trim();
-      if (!url) {
-        throw new Error('Mercado Pago não retornou init_point.');
-      }
-
-      await navigator.clipboard.writeText(url).catch(() => null);
-      openWhatsAppWithLink(url, 'MercadoPago');
-      toast({ title: 'Link gerado!', description: 'O link foi copiado e o WhatsApp foi aberto.' });
-    } catch (e: any) {
-      toast({ title: 'Erro', description: e?.message || 'Falha ao gerar link.', variant: 'destructive' });
-    } finally {
-      setIsCreatingMercadoPagoLink(false);
-    }
-  };
-
 
   const handleGeneratePdfAndSend = async () => {
     const input = receiptRef.current;
@@ -528,20 +418,6 @@ export default function SingleInstallmentPage() {
              <p className="text-muted-foreground">Pedido: {order.id} / Parcela: {installment.installmentNumber}</p>
           </div>
            <div className="flex gap-2">
-            {installment.status !== 'Pago' && remainingBalance > 0 && (
-              <>
-                {mercadopagoEnabled && (
-                  <Button onClick={handleCreateMercadoPagoLink} disabled={isCreatingMercadoPagoLink} className="pdf-hidden">
-                    {isCreatingMercadoPagoLink ? 'Gerando link...' : 'Cobrar (Mercado Pago)'}
-                  </Button>
-                )}
-                {stripeEnabled && (
-                  <Button onClick={handleCreateStripeLink} disabled={isCreatingStripeLink} className="pdf-hidden">
-                    {isCreatingStripeLink ? 'Gerando link...' : 'Cobrar (Stripe)'}
-                  </Button>
-                )}
-              </>
-            )}
             <Button onClick={handleGeneratePdfAndSend} className="pdf-hidden">
                 <Send className="mr-2 h-4 w-4" />
                 Gerar PDF e Abrir WhatsApp

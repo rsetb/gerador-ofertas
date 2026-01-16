@@ -22,8 +22,6 @@ const initialSettings: StoreSettings = {
     accessControlEnabled: false,
     commercialHourStart: '08:00',
     commercialHourEnd: '18:00',
-    stripeEnabled: false,
-    mercadopagoEnabled: false,
 };
 
 const SETTINGS_CACHE_KEY = 'adcpro/storeSettingsCache/v1';

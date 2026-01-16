@@ -1,301 +1,109 @@
-
 'use client';
 
-import { ReactNode, useEffect, useState } from "react";
-import { useAuth } from "@/context/AuthContext";
-import { useSettings } from "@/context/SettingsContext";
-import { useRouter, usePathname } from "next/navigation";
-import { LogOut, Shield, Store, KeyRound, ChevronDown, Clock, Moon, Sun, Menu } from 'lucide-react';
-import AdminNav from "@/components/AdminNav";
-import { Button } from "@/components/ui/button";
-import { hasAccess } from "@/lib/permissions";
-import { useToast } from "@/hooks/use-toast";
-import { usePermissions } from "@/context/PermissionsContext";
-import Link from "next/link";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '@/components/ui/dialog';
-import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from '@/components/ui/form';
-import { Input } from '@/components/ui/input';
-import { useForm } from 'react-hook-form';
-import { zodResolver } from '@hookform/resolvers/zod';
-import * as z from 'zod';
-import { useTheme } from "next-themes";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
-import type { AppSection } from "@/lib/types";
-import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
-import ScrollButtons from "@/components/ScrollButtons";
-import { Switch } from "@/components/ui/switch";
+import Link from 'next/link';
+import { useEffect, useMemo, useState } from 'react';
+import { useTheme } from 'next-themes';
+import { PermissionsProvider } from '@/context/PermissionsContext';
+import { AdminProvider } from '@/context/AdminContext';
+import AdminNav from '@/components/AdminNav';
+import { useAuth } from '@/context/AuthContext';
+import { Button, buttonVariants } from '@/components/ui/button';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
+import { cn } from '@/lib/utils';
+import { ArrowLeft, ChevronDown, Moon, Shield, Sun } from 'lucide-react';
+import { Switch } from '@/components/ui/switch';
+import type { UserRole } from '@/lib/types';
 
-const changePasswordSchema = z.object({
-  currentPassword: z.string().min(1, 'A senha atual é obrigatória.'),
-  newPassword: z.string().min(6, 'A nova senha deve ter pelo menos 6 caracteres.'),
-  confirmPassword: z.string(),
-}).refine(data => data.newPassword === data.confirmPassword, {
-  message: 'As senhas não correspondem.',
-  path: ['confirmPassword'],
-});
-
-const pathToSectionMap: { [key: string]: AppSection } = {
-    '/admin/pedidos': 'pedidos',
-    '/admin/criar-pedido': 'criar-pedido',
-    '/admin/clientes': 'clientes',
-    '/admin/produtos': 'produtos',
-    '/admin/categorias': 'categorias',
-    '/admin/avarias': 'avarias',
-    '/admin/financeiro': 'financeiro',
-    '/admin/minhas-comissoes': 'minhas-comissoes',
-    '/admin/auditoria': 'auditoria',
-    '/admin/configuracao': 'configuracao',
-    '/admin/usuarios': 'usuarios',
+const getRoleLabel = (role: UserRole) => {
+  switch (role) {
+    case 'admin':
+      return 'Admin';
+    case 'gerente':
+      return 'Gerente';
+    case 'vendedor':
+      return 'Vendedor';
+    case 'vendedor_externo':
+      return 'Vendedor Externo';
+    default:
+      return role;
+  }
 };
 
-const isWithinCommercialHours = (start: string, end: string) => {
-    const now = new Date();
-    const currentTime = now.getHours() * 60 + now.getMinutes();
-
-    const [startHour, startMinute] = start.split(':').map(Number);
-    const startTime = startHour * 60 + startMinute;
-
-    const [endHour, endMinute] = end.split(':').map(Number);
-    const endTime = endHour * 60 + endMinute;
-
-    return currentTime >= startTime && currentTime <= endTime;
-};
-
-function ModeToggle() {
-  const { resolvedTheme, setTheme } = useTheme()
-  const [mounted, setMounted] = useState(false)
+export default function AdminLayout({ children }: { children: React.ReactNode }) {
+  const { user, logout, isLoading } = useAuth();
+  const { resolvedTheme, setTheme } = useTheme();
+  const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
-    setMounted(true)
-  }, [])
+    setMounted(true);
+  }, []);
 
-  if (!mounted) {
-    return <div className="h-6 w-11" aria-hidden />
-  }
-
-  const isDark = resolvedTheme === "dark"
+  const isDark = mounted && resolvedTheme === 'dark';
+  const userRoleLabel = useMemo(() => (user?.role ? getRoleLabel(user.role) : ''), [user?.role]);
 
   return (
-    <div className="flex items-center gap-2">
-      <Sun className="h-4 w-4 text-muted-foreground" aria-hidden />
-      <Switch
-        checked={isDark}
-        onCheckedChange={(checked) => setTheme(checked ? "dark" : "light")}
-        aria-label="Alternar tema claro/escuro"
-      />
-      <Moon className="h-4 w-4 text-muted-foreground" aria-hidden />
-    </div>
-  )
-}
-
-function AdminLayoutContent({ children }: { children: ReactNode }) {
-    const { user, isAuthenticated, isLoading, logout, changeMyPassword } = useAuth();
-    const { permissions, isLoading: permissionsLoading } = usePermissions();
-    const { settings, isLoading: settingsLoading } = useSettings();
-    const router = useRouter();
-    const pathname = usePathname();
-    const { toast } = useToast();
-    const [isPasswordDialogOpen, setIsPasswordDialogOpen] = useState(false);
-    const [isNavSheetOpen, setIsNavSheetOpen] = useState(false);
-
-    const form = useForm<z.infer<typeof changePasswordSchema>>({
-        resolver: zodResolver(changePasswordSchema),
-        defaultValues: {
-            currentPassword: '',
-            newPassword: '',
-            confirmPassword: ''
-        }
-    });
-
-    useEffect(() => {
-        const totalLoading = isLoading || permissionsLoading || settingsLoading;
-        if (!totalLoading && !isAuthenticated) {
-            router.push('/login');
-            return;
-        }
-
-        if (!totalLoading && isAuthenticated && user && permissions) {
-            // Check for commercial hours access
-            if (
-                settings.accessControlEnabled && 
-                (user.role === 'vendedor' || user.role === 'vendedor_externo') && 
-                !isWithinCommercialHours(settings.commercialHourStart || '00:00', settings.commercialHourEnd || '23:59')
-            ) {
-                 toast({
-                    title: "Acesso Fora do Horário",
-                    description: `O acesso para vendedores está disponível apenas entre ${settings.commercialHourStart} e ${settings.commercialHourEnd}.`,
-                    variant: "destructive",
-                    duration: Infinity,
-                });
-                logout();
-                return;
-            }
-
-
-            // Check for page access permission
-            const currentSection = Object.entries(pathToSectionMap)
-                .filter(([path]) => pathname.startsWith(path))
-                .sort((a,b) => b[0].length - a[0].length)[0]?.[1];
-            
-            if (currentSection && !hasAccess(user.role, currentSection, permissions)) {
-                toast({
-                    title: "Acesso Negado",
-                    description: "Você não tem permissão para acessar esta página.",
-                    variant: "destructive"
-                });
-                router.push('/admin');
-            }
-        }
-    }, [isLoading, permissionsLoading, settingsLoading, isAuthenticated, user, permissions, settings, router, pathname, toast, logout]);
-    
-    useEffect(() => {
-        setIsNavSheetOpen(false);
-    }, [pathname]);
-
-    const handlePasswordChange = async (values: z.infer<typeof changePasswordSchema>) => {
-        const success = await changeMyPassword(values.currentPassword, values.newPassword);
-        if (success) {
-            setIsPasswordDialogOpen(false);
-            form.reset();
-        }
-    };
-
-    if (isLoading || permissionsLoading || settingsLoading || !isAuthenticated || !user) {
-        return (
-            <div className="flex h-screen w-full items-center justify-center bg-background">
-                <p>Verificando autenticação e permissões...</p>
-            </div>
-        );
-    }
-    
-    if (pathname === '/admin') {
-        return <main>{children}</main>;
-    }
-
-    return (
-        <>
-            <div className="container mx-auto px-4 py-8 print:p-0">
-                <header className="mb-8 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 border-b pb-6 print-hidden">
-                    <div className="flex items-center gap-4">
-                        <Sheet open={isNavSheetOpen} onOpenChange={setIsNavSheetOpen}>
-                            <SheetTrigger asChild>
-                                <Button variant="outline" size="icon" className="md:hidden">
-                                    <Menu />
-                                </Button>
-                            </SheetTrigger>
-                            <SheetContent side="left" className="p-0">
-                                <AdminNav />
-                            </SheetContent>
-                        </Sheet>
-                        <Shield className="h-10 w-10 text-primary hidden sm:block" />
-                        <div>
-                            <h1 className="text-xl sm:text-3xl font-bold font-headline text-primary">Painel Administrativo</h1>
-                            <p className="text-muted-foreground text-sm sm:text-base">Gerencie sua loja de forma fácil e rápida.</p>
-                        </div>
-                    </div>
-                        <div className="flex items-center gap-2 sm:gap-4 self-end sm:self-center">
-                            <ModeToggle />
-                        <Button variant="outline" size="sm" asChild>
-                            <Link href="/">
-                                <Store className="mr-2 h-4 w-4" />
-                                <span className="hidden sm:inline">Voltar à Loja</span>
-                            </Link>
-                        </Button>
-                        <DropdownMenu>
-                            <DropdownMenuTrigger asChild>
-                                <Button variant="outline" size="sm">
-                                    <div className="flex flex-col items-start pr-2">
-                                        <span className="font-semibold text-sm">{user.name}</span>
-                                        <span className="text-xs text-muted-foreground capitalize -mt-1">{user.role}</span>
-                                    </div>
-                                    <ChevronDown className="h-4 w-4" />
-                                </Button>
-                            </DropdownMenuTrigger>
-                            <DropdownMenuContent align="end" className="w-56">
-                                <DropdownMenuItem onClick={() => setIsPasswordDialogOpen(true)}>
-                                    <KeyRound className="mr-2 h-4 w-4" />
-                                    <span>Alterar Senha</span>
-                                </DropdownMenuItem>
-                                <DropdownMenuSeparator />
-                                <DropdownMenuItem onClick={() => logout()} className="text-destructive focus:text-destructive">
-                                    <LogOut className="mr-2 h-4 w-4" />
-                                    <span>Sair</span>
-                                </DropdownMenuItem>
-                            </DropdownMenuContent>
-                        </DropdownMenu>
-                    </div>
-                </header>
-                <div className="print-hidden hidden md:block">
-                    <AdminNav />
+    <PermissionsProvider>
+      <AdminProvider>
+        <div className="min-h-screen bg-muted/30">
+          <div className="border-b bg-background">
+            <div className="container mx-auto flex flex-col gap-4 p-4 sm:flex-row sm:items-center sm:justify-between">
+              <div className="flex items-start gap-3">
+                <Shield className="mt-0.5 h-6 w-6 text-primary" />
+                <div className="min-w-0">
+                  <p className="text-lg font-semibold leading-none">Painel Administrativo</p>
+                  <p className="text-sm text-muted-foreground">Gerencie sua loja de forma fácil e rápida.</p>
                 </div>
-                <main>{children}</main>
-                <ScrollButtons />
+              </div>
+
+              <div className="flex flex-wrap items-center justify-end gap-2">
+                <div className="flex items-center gap-2 pr-1">
+                  <Sun className="hidden sm:block h-4 w-4 text-muted-foreground" aria-hidden />
+                  <Switch
+                    checked={!!isDark}
+                    onCheckedChange={(checked) => setTheme(checked ? 'dark' : 'light')}
+                    aria-label="Alternar tema claro/escuro"
+                  />
+                  <Moon className="hidden sm:block h-4 w-4 text-muted-foreground" aria-hidden />
+                </div>
+
+                <Link
+                  href="/"
+                  className={cn(buttonVariants({ variant: 'outline', size: 'sm' }))}
+                >
+                  <ArrowLeft className="mr-2 h-4 w-4" />
+                  Voltar a Loja
+                </Link>
+
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button variant="outline" size="sm" disabled={!user || isLoading}>
+                      <span className="flex min-w-0 flex-col items-start leading-none">
+                        <span className="truncate text-xs text-muted-foreground">
+                          {user?.name || 'Carregando...'}
+                        </span>
+                        <span className="truncate text-xs font-semibold">{userRoleLabel || ' '}</span>
+                      </span>
+                      <ChevronDown className="ml-2 h-4 w-4 opacity-70" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end" className="w-48">
+                    <DropdownMenuLabel>Conta</DropdownMenuLabel>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem onClick={logout} disabled={!user}>
+                      Sair
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              </div>
             </div>
+          </div>
 
-            <Dialog open={isPasswordDialogOpen} onOpenChange={setIsPasswordDialogOpen}>
-                <DialogContent className="sm:max-w-md">
-                    <DialogHeader>
-                        <DialogTitle>Alterar Minha Senha</DialogTitle>
-                        <DialogDescription>
-                            Para sua segurança, informe sua senha atual antes de definir uma nova.
-                        </DialogDescription>
-                    </DialogHeader>
-                    <Form {...form}>
-                        <form onSubmit={form.handleSubmit(handlePasswordChange)} className="space-y-4 py-4">
-                            <FormField
-                                control={form.control}
-                                name="currentPassword"
-                                render={({ field }) => (
-                                    <FormItem>
-                                        <FormLabel>Senha Atual</FormLabel>
-                                        <FormControl><Input type="password" {...field} /></FormControl>
-                                        <FormMessage />
-                                    </FormItem>
-                                )}
-                            />
-                            <FormField
-                                control={form.control}
-                                name="newPassword"
-                                render={({ field }) => (
-                                    <FormItem>
-                                        <FormLabel>Nova Senha</FormLabel>
-                                        <FormControl><Input type="password" placeholder="Mínimo 6 caracteres" {...field} /></FormControl>
-                                        <FormMessage />
-                                    </FormItem>
-                                )}
-                            />
-                            <FormField
-                                control={form.control}
-                                name="confirmPassword"
-                                render={({ field }) => (
-                                    <FormItem>
-                                        <FormLabel>Confirmar Nova Senha</FormLabel>
-                                        <FormControl><Input type="password" {...field} /></FormControl>
-                                        <FormMessage />
-                                    </FormItem>
-                                )}
-                            />
-                            <DialogFooter>
-                                <Button type="button" variant="outline" onClick={() => setIsPasswordDialogOpen(false)}>Cancelar</Button>
-                                <Button type="submit" disabled={form.formState.isSubmitting}>Salvar Nova Senha</Button>
-                            </DialogFooter>
-                        </form>
-                    </Form>
-                </DialogContent>
-            </Dialog>
-        </>
-    );
-}
-
-
-export default function AdminLayout({ children }: { children: ReactNode }) {
-    return (
-        <AdminLayoutContent>{children}</AdminLayoutContent>
-    );
+          <main className="container mx-auto p-4">
+            <AdminNav />
+            {children}
+          </main>
+        </div>
+      </AdminProvider>
+    </PermissionsProvider>
+  );
 }

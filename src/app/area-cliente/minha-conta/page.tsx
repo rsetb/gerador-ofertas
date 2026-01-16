@@ -41,10 +41,22 @@ export default function MyAccountPage() {
       return { totalComprado: 0, totalPago: 0, saldoDevedor: 0 };
     }
     
-    const allInstallments = sortedCustomerOrders.flatMap(order => (order.installmentDetails || []));
-    
     const totalComprado = sortedCustomerOrders.reduce((acc, order) => acc + order.total, 0);
-    const totalPago = allInstallments.reduce((sum, inst) => sum + (inst.paidAmount || 0), 0);
+    const totalPago = sortedCustomerOrders.reduce((sum, order) => {
+      if (order.paymentMethod === 'Crediário') {
+        const paid = (order.installmentDetails || []).reduce((s, inst) => s + (inst.paidAmount || 0), 0);
+        return sum + paid;
+      }
+      if (order.paymentMethod === 'Dinheiro') {
+        return sum + (order.total || 0);
+      }
+      if (order.paymentMethod === 'Pix') {
+        const isLegacyPix = !order.asaas?.paymentId;
+        const isPaid = isLegacyPix || !!order.asaas?.paidAt;
+        return sum + (isPaid ? (order.total || 0) : 0);
+      }
+      return sum;
+    }, 0);
     const saldoDevedor = totalComprado - totalPago;
 
     return { totalComprado, totalPago, saldoDevedor };
@@ -144,7 +156,11 @@ export default function MyAccountPage() {
                             {sortedCustomerOrders.length > 0 ? (
                                 <Accordion type="single" collapsible className="w-full space-y-2">
                                     {sortedCustomerOrders.map(order => {
-                                        const isPaidOff = (order.installmentDetails || []).every(inst => inst.status === 'Pago') || (order.paymentMethod && ['Pix', 'Dinheiro'].includes(order.paymentMethod));
+                                        const allInstallmentsPaid = (order.installmentDetails || []).every(inst => inst.status === 'Pago');
+                                        const isLegacyPix = order.paymentMethod === 'Pix' && !order.asaas?.paymentId;
+                                        const isPixPaid = order.paymentMethod === 'Pix' && (isLegacyPix || !!order.asaas?.paidAt);
+                                        const isImmediatePaid = order.paymentMethod === 'Dinheiro' || isPixPaid;
+                                        const isPaidOff = allInstallmentsPaid || isImmediatePaid;
                                         return (
                                             <AccordionItem value={order.id} key={order.id} className="border-b-0 rounded-lg border bg-background">
                                                 <AccordionTrigger className="p-4 hover:no-underline rounded-t-lg data-[state=open]:bg-muted/50 data-[state=open]:rounded-b-none">

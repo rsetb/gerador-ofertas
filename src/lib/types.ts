@@ -12,8 +12,12 @@ export type StoreSettings = {
     commercialHourEnd?: string;
     wapiInstance?: string;
     wapiToken?: string;
-    stripeEnabled?: boolean;
-    mercadopagoEnabled?: boolean;
+};
+
+export type AsaasSettings = {
+  env?: 'sandbox' | 'production';
+  accessToken?: string;
+  webhookToken?: string;
 };
 
 
@@ -83,7 +87,7 @@ export type Payment = {
   id: string;
   amount: number;
   date: string;
-  method: 'Dinheiro' | 'Pix' | 'Cartão (Crédito)' | 'Cartão (Débito)' | 'Stripe' | 'MercadoPago';
+  method: 'Dinheiro' | 'Pix' | 'Cartão (Crédito)' | 'Cartão (Débito)';
   change?: number;
   receivedBy?: string; // User name
 }
@@ -99,7 +103,21 @@ export type Installment = {
   payments: Payment[];
 }
 
-export type PaymentMethod = 'Crediário' | 'Pix' | 'Dinheiro' | 'Stripe' | 'MercadoPago';
+export type PaymentMethod = 'Crediário' | 'Pix' | 'Dinheiro';
+
+export type AsaasPaymentInfo = {
+  customerId?: string;
+  paymentId?: string;
+  status?: string | null;
+  lastEvent?: string;
+  updatedAt?: string;
+  paidAt?: string | null;
+  pix?: {
+    payload?: string;
+    encodedImage?: string | null;
+    expirationDate?: string | null;
+  };
+};
 
 export type Order = {
   id: string;
@@ -114,11 +132,6 @@ export type Order = {
   firstDueDate?: Date;
   status: 'Processando' | 'Enviado' | 'Entregue' | 'Cancelado' | 'Excluído';
   paymentMethod: PaymentMethod;
-  paymentStatus?: 'Pendente' | 'Pago' | 'Falhou';
-  paymentProvider?: 'Stripe' | 'MercadoPago';
-  paymentSessionId?: string;
-  paymentPreferenceId?: string;
-  paymentCheckoutUrl?: string;
   installmentDetails: Installment[];
   attachments?: Attachment[];
   sellerId?: string;
@@ -133,6 +146,7 @@ export type Order = {
   createdByName?: string;
   createdByRole?: OrderCreatorRole;
   createdIp?: string;
+  asaas?: AsaasPaymentInfo;
 };
 
 export type CommissionPayment = {

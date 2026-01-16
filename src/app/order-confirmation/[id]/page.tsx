@@ -5,7 +5,7 @@
 import { useEffect, useState, useMemo } from 'react';
 import { useCart } from '@/context/CartContext';
 import { useSettings } from '@/context/SettingsContext';
-import { useRouter, useParams, useSearchParams } from 'next/navigation';
+import { useRouter, useParams } from 'next/navigation';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Separator } from '@/components/ui/separator';
@@ -18,7 +18,7 @@ import { generatePixPayload } from '@/lib/pix';
 import PixQRCode from '@/components/PixQRCode';
 import { format } from 'date-fns';
 import { getClientFirebase } from '@/lib/firebase-client';
-import { doc, getDoc, updateDoc } from 'firebase/firestore';
+import { doc, getDoc } from 'firebase/firestore';
 
 
 const formatCurrency = (value: number) => {
@@ -26,14 +26,14 @@ const formatCurrency = (value: number) => {
 };
 
 export default function OrderConfirmationPage() {
-  const { lastOrder, clearCart } = useCart();
+  const { lastOrder } = useCart();
   const { settings } = useSettings();
   const router = useRouter();
   const params = useParams();
-  const searchParams = useSearchParams();
   const [order, setOrder] = useState<Order | null>(null);
   const [isOrdersLoading, setIsLoading] = useState(true);
-  const [paymentCheckState, setPaymentCheckState] = useState<'idle' | 'checking' | 'done' | 'error'>('idle');
+  const [asaasPixPayload, setAsaasPixPayload] = useState<string | null>(null);
+  const [asaasError, setAsaasError] = useState<string | null>(null);
 
   useEffect(() => {
     const orderId = params.id as string;
@@ -72,99 +72,87 @@ export default function OrderConfirmationPage() {
   }, [params.id, lastOrder, router]);
 
   useEffect(() => {
-    if (!order?.id) return;
-
-    const provider = (searchParams.get('provider') || '').trim().toLowerCase();
-    const stripeSessionId = (searchParams.get('session_id') || '').trim();
-    const mpPaymentId = (searchParams.get('payment_id') || searchParams.get('collection_id') || '').trim();
-
-    const isExternal = order.paymentMethod === 'Stripe' || order.paymentMethod === 'MercadoPago';
-    if (isExternal) {
-      clearCart();
-      try {
-        localStorage.removeItem('adcpro/pendingOrderId');
-      } catch {
-      }
+    if (!order) return;
+    if (order.paymentMethod !== 'Pix') return;
+    if (order.asaas?.pix?.payload) {
+      setAsaasPixPayload(order.asaas.pix.payload || null);
+      return;
     }
 
-    if (!provider) return;
-    if (order.paymentStatus === 'Pago') return;
-    if (paymentCheckState === 'checking') return;
+    let canceled = false;
+    setAsaasError(null);
 
-    const run = async () => {
-      setPaymentCheckState('checking');
-      try {
-        const { db } = getClientFirebase();
-        const orderRef = doc(db, 'orders', order.id);
-
-        if (provider === 'stripe' && stripeSessionId) {
-          const res = await fetch(`/api/stripe/retrieve-session?session_id=${encodeURIComponent(stripeSessionId)}`, {
-            method: 'GET',
-            cache: 'no-store',
-          });
-          const data = (await res.json().catch(() => null)) as any;
-          if (!res.ok) {
-            throw new Error(String(data?.error || 'Erro ao verificar pagamento no Stripe.'));
-          }
-
-          const orderId = String(data?.metadata?.orderId || data?.client_reference_id || '');
-          if (orderId && orderId !== order.id) {
-            throw new Error('Sessão de pagamento não corresponde ao pedido.');
-          }
-
-          const nextStatus: Order['paymentStatus'] =
-            String(data?.payment_status || '') === 'paid' ? 'Pago' : 'Pendente';
-
-          const patch: Partial<Order> = {
-            paymentProvider: 'Stripe',
-            paymentStatus: nextStatus,
-            paymentSessionId: String(data?.id || stripeSessionId),
-          };
-
-          await updateDoc(orderRef, patch as any);
-          setOrder((prev) => (prev ? ({ ...prev, ...patch } as Order) : prev));
+    fetch('/api/asaas/pix', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        orderId: order.id,
+        amount: order.total,
+        customer: {
+          name: order.customer.name,
+          cpfCnpj: order.customer.cpf || '',
+          email: order.customer.email || '',
+          phone: order.customer.phone || '',
+          zip: order.customer.zip || '',
+          address: order.customer.address || '',
+          number: order.customer.number || '',
+          complement: order.customer.complement || '',
+          neighborhood: order.customer.neighborhood || '',
+          city: order.customer.city || '',
+          state: order.customer.state || '',
+        },
+      }),
+    })
+      .then(async (res) => {
+        const data = await res.json().catch(() => null);
+        if (!res.ok) {
+          const msg = typeof data?.error === 'string' ? data.error : 'Falha ao gerar PIX no Asaas.';
+          throw new Error(msg);
         }
+        return data as any;
+      })
+      .then(async (data) => {
+        const payload = String(data?.pix?.payload || '');
+        if (!payload) throw new Error('PIX do Asaas retornou payload vazio.');
+        if (canceled) return;
+        setAsaasPixPayload(payload);
+        const nextAsaas = {
+          customerId: String(data?.asaasCustomerId || ''),
+          paymentId: String(data?.asaasPaymentId || ''),
+          status: data?.status ?? null,
+          pix: {
+            payload,
+            encodedImage: data?.pix?.encodedImage ?? null,
+            expirationDate: data?.pix?.expirationDate ?? null,
+          },
+          updatedAt: new Date().toISOString(),
+        };
+        setOrder((prev) => (prev ? { ...prev, asaas: nextAsaas } : prev));
+      })
+      .catch((e) => {
+        if (canceled) return;
+        setAsaasError(e instanceof Error ? e.message : 'Falha ao gerar PIX no Asaas.');
+      });
 
-        if (provider === 'mercadopago' && mpPaymentId) {
-          const res = await fetch(`/api/mercadopago/retrieve-payment?payment_id=${encodeURIComponent(mpPaymentId)}`, {
-            method: 'GET',
-            cache: 'no-store',
-          });
-          const data = (await res.json().catch(() => null)) as any;
-          if (!res.ok) {
-            throw new Error(String(data?.error || 'Erro ao verificar pagamento no Mercado Pago.'));
-          }
-
-          const orderId = String(data?.external_reference || '');
-          if (orderId && orderId !== order.id) {
-            throw new Error('Pagamento não corresponde ao pedido.');
-          }
-
-          const status = String(data?.status || '');
-          const nextStatus: Order['paymentStatus'] =
-            status === 'approved' ? 'Pago' : status === 'rejected' || status === 'cancelled' ? 'Falhou' : 'Pendente';
-
-          const patch: Partial<Order> = {
-            paymentProvider: 'MercadoPago',
-            paymentStatus: nextStatus,
-          };
-
-          await updateDoc(orderRef, patch as any);
-          setOrder((prev) => (prev ? ({ ...prev, ...patch } as Order) : prev));
-        }
-
-        setPaymentCheckState('done');
-      } catch {
-        setPaymentCheckState('error');
-      }
+    return () => {
+      canceled = true;
     };
-
-    void run();
-  }, [order?.id, order?.paymentMethod, order?.paymentStatus, paymentCheckState, searchParams, clearCart]);
+  }, [order]);
 
   const pixPayload = useMemo(() => {
-    if (!order || !settings.pixKey) return null;
+    if (!order) return null;
     if (order.paymentMethod !== 'Pix' && order.paymentMethod !== 'Crediário') return null;
+
+    if (order.paymentMethod === 'Pix') {
+      if (asaasPixPayload) return asaasPixPayload;
+      if (settings.pixKey) {
+        const { pixKey, storeName, storeCity } = settings;
+        return generatePixPayload(pixKey, storeName, storeCity, order.id, order.total);
+      }
+      return null;
+    }
+
+    if (!settings.pixKey) return null;
 
     const { pixKey, storeName, storeCity } = settings;
     
@@ -178,7 +166,7 @@ export default function OrderConfirmationPage() {
     }
     
     return generatePixPayload(pixKey, storeName, storeCity, txid, amount);
-  }, [order, settings]);
+  }, [order, settings, asaasPixPayload]);
 
   if (isOrdersLoading || !order) {
     return (
@@ -187,9 +175,6 @@ export default function OrderConfirmationPage() {
       </div>
     );
   }
-
-  const paymentStatusLabel =
-    order.paymentStatus === 'Pago' ? 'Pago' : order.paymentStatus === 'Falhou' ? 'Falhou' : order.paymentStatus === 'Pendente' ? 'Pendente' : '';
 
   return (
     <div className="container mx-auto py-12 px-4">
@@ -258,16 +243,6 @@ export default function OrderConfirmationPage() {
                   <span className="text-muted-foreground">Forma de Pagamento:</span>
                   <span className="font-semibold">{order.paymentMethod}</span>
                 </div>
-                {paymentStatusLabel && (
-                  <div className="flex justify-between">
-                    <span className="text-muted-foreground">Status do Pagamento:</span>
-                    <span className="font-semibold">
-                      <Badge variant={order.paymentStatus === 'Pago' ? 'secondary' : order.paymentStatus === 'Falhou' ? 'destructive' : 'outline'}>
-                        {paymentStatusLabel}
-                      </Badge>
-                    </span>
-                  </div>
-                )}
                 
                 <div className="flex justify-between">
                   <span className="text-muted-foreground">Parcelas:</span>
@@ -288,23 +263,22 @@ export default function OrderConfirmationPage() {
                   </div>
                 )}
               </div>
-              {paymentCheckState === 'checking' && (
-                <p className="mt-3 text-xs text-muted-foreground">Verificando pagamento...</p>
+              {asaasError && order.paymentMethod === 'Pix' && (
+                <p className="mt-4 text-xs text-destructive">{asaasError}</p>
               )}
-              {(order.paymentMethod === 'Stripe' || order.paymentMethod === 'MercadoPago') &&
-                order.paymentStatus !== 'Pago' &&
-                order.paymentCheckoutUrl && (
-                  <div className="mt-4">
-                    <a href={order.paymentCheckoutUrl} target="_blank" rel="noopener noreferrer">
-                      <Button variant="outline">Continuar Pagamento</Button>
-                    </a>
-                  </div>
-                )}
-               {pixPayload && (
-                 <div className="mt-6">
-                    <p className="font-semibold mb-2 text-primary">Pague a 1ª parcela com PIX</p>
-                    <PixQRCode payload={pixPayload} />
-                 </div>
+              {pixPayload && (
+                <div className="mt-6">
+                  <p className="font-semibold mb-2 text-primary">
+                    {order.paymentMethod === 'Crediário' ? 'Pague a 1ª parcela com PIX' : 'Pague com PIX'}
+                  </p>
+                  <PixQRCode payload={pixPayload} />
+                  {order.paymentMethod === 'Crediário' && settings.pixKey && (
+                    <p className="mt-2 text-xs text-muted-foreground">
+                      Chave PIX:{' '}
+                      <span className="font-mono break-all text-foreground">{settings.pixKey}</span>
+                    </p>
+                  )}
+                </div>
               )}
             </div>
           </div>

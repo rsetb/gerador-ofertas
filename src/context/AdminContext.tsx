@@ -407,12 +407,15 @@ export const AdminProvider = ({ children }: { children: ReactNode }) => {
             const paid = (order.installmentDetails || []).reduce((s, inst) => s + (inst.paidAmount || 0), 0);
             return sum + paid;
           }
-
-          if ((order.paymentMethod === 'Stripe' || order.paymentMethod === 'MercadoPago') && order.paymentStatus !== 'Pago') {
-            return sum;
+          if (order.paymentMethod === 'Dinheiro') {
+            return sum + (order.total || 0);
           }
-
-          return sum + (order.total || 0);
+          if (order.paymentMethod === 'Pix') {
+            const isLegacyPix = !order.asaas?.paymentId;
+            const isPaid = isLegacyPix || !!order.asaas?.paidAt;
+            return sum + (isPaid ? (order.total || 0) : 0);
+          }
+          return sum;
         }, 0);
         const saldoDevedor = totalComprado - totalPago;
         financialsByCustomer[customerKey] = { totalComprado, totalPago, saldoDevedor };
@@ -470,10 +473,15 @@ export const AdminProvider = ({ children }: { children: ReactNode }) => {
             }
             });
         } else {
-            if ((order.paymentMethod === 'Stripe' || order.paymentMethod === 'MercadoPago') && order.paymentStatus !== 'Pago') {
-              totalPendente += order.total;
-            } else {
-              totalRecebido += order.total;
+            if (order.paymentMethod === 'Dinheiro') {
+                totalRecebido += order.total;
+            } else if (order.paymentMethod === 'Pix') {
+                const isLegacyPix = !order.asaas?.paymentId;
+                if (isLegacyPix || order.asaas?.paidAt) {
+                    totalRecebido += order.total;
+                } else {
+                    totalPendente += order.total;
+                }
             }
         }
     });
@@ -1513,11 +1521,13 @@ export const AdminProvider = ({ children }: { children: ReactNode }) => {
         const newTotalFinanced = updatedInstallments.reduce((sum, inst) => sum + inst.amount, 0);
         
         const subtotal = order.items.reduce((acc, item) => acc + (item.price * item.quantity), 0);
-        const newDiscount = subtotal - (newTotalFinanced + (order.downPayment || 0));
+        const newTotal = newTotalFinanced + (order.downPayment || 0);
+        const newDiscount = subtotal - newTotal;
 
         const dataToUpdate: Partial<Order> = {
             installmentDetails: updatedInstallments,
-            total: newTotalFinanced,
+            installmentValue: updatedInstallments[0]?.amount || 0,
+            total: newTotal,
             discount: newDiscount,
         };
 
@@ -1897,13 +1907,14 @@ export const AdminProvider = ({ children }: { children: ReactNode }) => {
 
     if (hasInstallmentsChanged || hasDiscountChanged || hasDownPayment || resetDownPayment) {
         const currentDiscount = hasDiscountChanged ? details.discount! : (order.discount || 0);
-        const totalAfterDiscountAndEntry = subtotal - currentDiscount - currentDownPayment;
+        const totalAfterDiscount = subtotal - currentDiscount;
+        const totalFinanced = Math.max(0, totalAfterDiscount - currentDownPayment);
         
-        detailsToUpdate.total = totalAfterDiscountAndEntry;
+        detailsToUpdate.total = totalAfterDiscount;
         
         const currentInstallments = hasInstallmentsChanged ? details.installments! : order.installments;
         
-        let newInstallmentDetails = recalculateInstallments(totalAfterDiscountAndEntry, currentInstallments, orderId, order.date);
+        let newInstallmentDetails = recalculateInstallments(totalFinanced, currentInstallments, orderId, order.date);
 
         if (hasDownPayment) {
             logAction('Registro de Entrada', `Registrada entrada de R$${downPayment?.toFixed(2)} no pedido #${orderId}.`, user);

@@ -33,8 +33,6 @@ import { Textarea } from './ui/textarea';
 import Link from 'next/link';
 import { maskCpf, maskPhone, onlyDigits } from '@/lib/utils';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { getClientFirebase } from '@/lib/firebase-client';
-import { doc, updateDoc } from 'firebase/firestore';
 
 function isValidCPF(cpf: string) {
     if (typeof cpf !== 'string') return false;
@@ -70,7 +68,7 @@ const checkoutSchema = z.object({
   city: z.string().min(2, 'Cidade é obrigatória.'),
   state: z.string().min(2, 'Estado é obrigatória.'),
   observations: z.string().min(1, 'Observações são obrigatórias.'),
-  paymentMethod: z.enum(['Crediário', 'Pix', 'Dinheiro', 'Stripe', 'MercadoPago']),
+  paymentMethod: z.enum(['Crediário', 'Pix', 'Dinheiro']),
   sellerId: z.string().optional(),
   sellerName: z.string().optional(),
 });
@@ -173,17 +171,6 @@ export default function CheckoutForm() {
   
   const sellerName = form.watch('sellerName');
   const paymentMethod = form.watch('paymentMethod');
-  const stripeEnabled = !!settings.stripeEnabled;
-  const mercadopagoEnabled = !!settings.mercadopagoEnabled;
-
-  useEffect(() => {
-    if (paymentMethod === 'Stripe' && !stripeEnabled) {
-      form.setValue('paymentMethod', 'Crediário');
-    }
-    if (paymentMethod === 'MercadoPago' && !mercadopagoEnabled) {
-      form.setValue('paymentMethod', 'Crediário');
-    }
-  }, [paymentMethod, stripeEnabled, mercadopagoEnabled, form]);
 
   const handleZipBlur = async (e: React.FocusEvent<HTMLInputElement>) => {
     const zip = e.target.value.replace(/\D/g, '');
@@ -246,19 +233,6 @@ export default function CheckoutForm() {
     }
     
     const finalPaymentMethod = formPaymentMethod as PaymentMethod;
-    if (finalPaymentMethod === 'Stripe' && !stripeEnabled) {
-      toast({ title: 'Forma de pagamento indisponível', description: 'Stripe está desativado.', variant: 'destructive' });
-      return;
-    }
-    if (finalPaymentMethod === 'MercadoPago' && !mercadopagoEnabled) {
-      toast({
-        title: 'Forma de pagamento indisponível',
-        description: 'Mercado Pago está desativado.',
-        variant: 'destructive',
-      });
-      return;
-    }
-    const isExternalPayment = finalPaymentMethod === 'Stripe' || finalPaymentMethod === 'MercadoPago';
     const isCrediario = finalPaymentMethod === 'Crediário';
     const finalInstallments = isCrediario ? 1 : 0;
     const finalInstallmentValue = total;
@@ -286,8 +260,6 @@ export default function CheckoutForm() {
       firstDueDate: addMonths(orderDate, 1),
       status: 'Processando',
       paymentMethod: finalPaymentMethod,
-      paymentStatus: isExternalPayment ? 'Pendente' : undefined,
-      paymentProvider: finalPaymentMethod === 'Stripe' ? 'Stripe' : finalPaymentMethod === 'MercadoPago' ? 'MercadoPago' : undefined,
       installmentDetails,
       sellerId: formSellerId, // Use directly from form values
       sellerName: formSellerName, // Use directly from form values
@@ -323,7 +295,7 @@ export default function CheckoutForm() {
                   `---------------------------`,
                   ``,
                   `*Total da Compra:* ${formatCurrency(total)}`,
-                  `*Forma de Pagamento:* ${finalPaymentMethod === 'MercadoPago' ? 'Mercado Pago' : finalPaymentMethod}`,
+                  `*Forma de Pagamento:* ${finalPaymentMethod}`,
                   `*Condição Sugerida:* Até ${maxAllowedInstallments}x`,
                   `*Observação:* ${values.observations || '-'}`,
                   ``,
@@ -347,90 +319,7 @@ export default function CheckoutForm() {
               window.open(webUrl, '_blank');
           }
 
-          if (isExternalPayment) {
-            try {
-              const origin = window.location.origin;
-
-              if (finalPaymentMethod === 'Stripe') {
-                const res = await fetch('/api/stripe/create-checkout-session', {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({
-                    orderId: savedOrder.id,
-                    items: savedOrder.items.map((i) => ({ name: i.name, quantity: i.quantity, unitAmount: i.price })),
-                    customer: { name: savedOrder.customer.name, email: savedOrder.customer.email || '' },
-                    successUrl: `${origin}/order-confirmation/${savedOrder.id}?provider=stripe&session_id={CHECKOUT_SESSION_ID}`,
-                    cancelUrl: `${origin}/checkout?canceled=1&orderId=${savedOrder.id}`,
-                  }),
-                });
-
-                const data = (await res.json()) as { id?: string; url?: string; error?: string };
-                if (!res.ok || !data.url || !data.id) {
-                  throw new Error(data.error || 'Não foi possível iniciar o pagamento no Stripe.');
-                }
-
-                try {
-                  const { db } = getClientFirebase();
-                  await updateDoc(doc(db, 'orders', savedOrder.id), {
-                    paymentProvider: 'Stripe',
-                    paymentStatus: 'Pendente',
-                    paymentSessionId: data.id,
-                    paymentCheckoutUrl: data.url,
-                  });
-                } catch {
-                }
-
-                localStorage.setItem('adcpro/pendingOrderId', savedOrder.id);
-                window.location.href = data.url;
-                return;
-              }
-
-              if (finalPaymentMethod === 'MercadoPago') {
-                const res = await fetch('/api/mercadopago/create-preference', {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({
-                    orderId: savedOrder.id,
-                    items: savedOrder.items.map((i) => ({ title: i.name, quantity: i.quantity, unit_price: i.price })),
-                    customer: { name: savedOrder.customer.name, email: savedOrder.customer.email || '' },
-                    backUrls: {
-                      success: `${origin}/order-confirmation/${savedOrder.id}?provider=mercadopago`,
-                      pending: `${origin}/order-confirmation/${savedOrder.id}?provider=mercadopago`,
-                      failure: `${origin}/order-confirmation/${savedOrder.id}?provider=mercadopago`,
-                    },
-                  }),
-                });
-
-                const data = (await res.json()) as { id?: string; init_point?: string; error?: string };
-                if (!res.ok || !data.init_point || !data.id) {
-                  throw new Error(data.error || 'Não foi possível iniciar o pagamento no Mercado Pago.');
-                }
-
-                try {
-                  const { db } = getClientFirebase();
-                  await updateDoc(doc(db, 'orders', savedOrder.id), {
-                    paymentProvider: 'MercadoPago',
-                    paymentStatus: 'Pendente',
-                    paymentPreferenceId: data.id,
-                    paymentCheckoutUrl: data.init_point,
-                  });
-                } catch {
-                }
-
-                localStorage.setItem('adcpro/pendingOrderId', savedOrder.id);
-                window.location.href = data.init_point;
-                return;
-              }
-            } catch (e) {
-              toast({
-                title: "Erro ao iniciar pagamento",
-                description: e instanceof Error ? e.message : "Não foi possível iniciar o pagamento.",
-                variant: "destructive",
-              });
-            }
-          } else {
-            clearCart();
-          }
+          clearCart();
       
           router.push(`/order-confirmation/${savedOrder.id}`);
         }
@@ -482,7 +371,7 @@ export default function CheckoutForm() {
           </div>
            <div className="mt-4 p-4 bg-muted rounded-lg text-center">
               <p className="font-bold text-md text-accent flex items-center justify-center gap-2">
-                <CreditCard /> Pagamento via {paymentMethod === 'MercadoPago' ? 'Mercado Pago' : paymentMethod}
+                <CreditCard /> Pagamento via {paymentMethod}
               </p>
               {paymentMethod === 'Crediário' && (
                 <p className="text-sm text-muted-foreground mt-1">
@@ -497,16 +386,6 @@ export default function CheckoutForm() {
               {paymentMethod === 'Dinheiro' && (
                 <p className="text-sm text-muted-foreground mt-1">
                   Combine com o vendedor a entrega e o pagamento.
-                </p>
-              )}
-              {paymentMethod === 'Stripe' && (
-                <p className="text-sm text-muted-foreground mt-1">
-                  Você será redirecionado para concluir o pagamento no Stripe.
-                </p>
-              )}
-              {paymentMethod === 'MercadoPago' && (
-                <p className="text-sm text-muted-foreground mt-1">
-                  Você será redirecionado para concluir o pagamento no Mercado Pago.
                 </p>
               )}
             </div>
@@ -534,8 +413,6 @@ export default function CheckoutForm() {
                         <SelectItem value="Crediário">Crediário</SelectItem>
                         <SelectItem value="Pix">Pix</SelectItem>
                         <SelectItem value="Dinheiro">Dinheiro</SelectItem>
-                        {stripeEnabled && <SelectItem value="Stripe">Stripe</SelectItem>}
-                        {mercadopagoEnabled && <SelectItem value="MercadoPago">Mercado Pago</SelectItem>}
                       </SelectContent>
                     </Select>
                     <FormMessage />

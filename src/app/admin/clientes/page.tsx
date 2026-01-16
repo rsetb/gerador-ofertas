@@ -926,7 +926,10 @@ Não esqueça de enviar o comprovante!`;
                                 order.installmentDetails.length > 0 &&
                                 order.installmentDetails.every(inst => inst.status === 'Pago');
                             
-                            const isPaidOff = allInstallmentsPaid || (order.paymentMethod && ['Pix', 'Dinheiro'].includes(order.paymentMethod));
+                            const isLegacyPix = order.paymentMethod === 'Pix' && !order.asaas?.paymentId;
+                            const isPixPaid = order.paymentMethod === 'Pix' && (isLegacyPix || !!order.asaas?.paidAt);
+                            const isImmediatePaid = order.paymentMethod === 'Dinheiro' || isPixPaid;
+                            const isPaidOff = allInstallmentsPaid || isImmediatePaid;
                             const productNames = order.items.map(item => item.name).join(', ');
 
                             return (

@@ -3,10 +3,10 @@
 'use client';
 
 import { useParams } from 'next/navigation';
-import { useMemo, useState, useEffect } from 'react';
+import { Fragment, useMemo, useState, useEffect } from 'react';
 import type { Order, StoreSettings } from '@/lib/types';
 import { Button } from '@/components/ui/button';
-import { ArrowLeft, Printer, ShoppingCart, Phone } from 'lucide-react';
+import { ArrowLeft, Printer, ShoppingCart, Phone, History } from 'lucide-react';
 import Logo from '@/components/Logo';
 import { format, parseISO } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
@@ -29,8 +29,15 @@ const initialSettings: StoreSettings = {
 
 const CarnetContent = ({ order, settings, pixPayload, productCodeById }: { order: Order; settings: StoreSettings, pixPayload: string | null, productCodeById: Map<string, string> }) => {
     
+    const [expandedHistory, setExpandedHistory] = useState<number | null>(null);
     const subtotal = useMemo(() => order.items.reduce((acc, item) => acc + (item.price * item.quantity), 0), [order.items]);
-    const valorFinanciado = order.total;
+    const totalPedido = useMemo(() => Math.max(0, subtotal - (order.discount || 0)), [subtotal, order.discount]);
+    const entrada = order.downPayment || 0;
+    const totalFinanciado = useMemo(() => {
+        const financedFromInstallments = (order.installmentDetails || []).reduce((sum, inst) => sum + (inst.amount || 0), 0);
+        if (financedFromInstallments > 0) return financedFromInstallments;
+        return Math.max(0, totalPedido - entrada);
+    }, [order.installmentDetails, totalPedido, entrada]);
     const isOrderPaidOff = useMemo(() => (order.installmentDetails || []).every((inst) => inst.status === 'Pago'), [order.installmentDetails]);
     const productsList = useMemo(() => {
         const items = order.items || [];
@@ -182,23 +189,77 @@ const CarnetContent = ({ order, settings, pixPayload, productCodeById }: { order
                             <th className="px-2 py-1 print:px-1 print:py-0.5 text-center font-semibold w-[16%]">Parc.</th>
                             <th className="px-2 py-1 print:px-1 print:py-0.5 text-left font-semibold w-[22%]">Venc.</th>
                             <th className="px-2 py-1 print:px-1 print:py-0.5 text-right font-semibold w-[26%]">Valor (R$)</th>
-                            <th className="px-2 py-1 print:px-1 print:py-0.5 text-left font-semibold w-[36%]">Data Pag.</th>
+                            <th className="px-2 py-1 print:px-1 print:py-0.5 text-left font-semibold w-[28%]">Data Pag.</th>
+                            <th className="px-2 py-1 text-center font-semibold w-[8%] print:hidden">Hist.</th>
                         </tr>
                     </thead>
                     <tbody>
-                        {(order.installmentDetails || []).map((installment) => (
-                            <tr key={installment.installmentNumber} className="border-b last:border-none">
-                                <td className="px-2 py-1 print:px-1 print:py-0.5 text-center font-semibold">{installment.installmentNumber}/{order.installments}</td>
-                                <td className="px-2 py-1 print:px-1 print:py-0.5 font-semibold">{format(parseISO(installment.dueDate), 'dd/MM/yy')}</td>
-                                <td className="px-2 py-1 print:px-1 print:py-0.5 text-right font-mono font-semibold">{formatCurrency(installment.amount)}</td>
-                                <td className="px-2 py-1 print:px-1 print:py-0.5 border-l">
-                                    {installment.status === 'Pago' 
-                                        ? (installment.paymentDate ? format(parseISO(installment.paymentDate), 'dd/MM/yy') : 'Pago')
-                                        : '\u00A0'
-                                    }
-                                </td>
-                            </tr>
-                        ))}
+                        {(order.installmentDetails || []).map((installment) => {
+                            const isExpanded = expandedHistory === installment.installmentNumber;
+                            const payments = Array.isArray(installment.payments) ? [...installment.payments] : [];
+                            payments.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+                            const hasPayments = payments.length > 0;
+
+                            return (
+                                <Fragment key={installment.installmentNumber}>
+                                    <tr className="border-b last:border-none">
+                                        <td className="px-2 py-1 print:px-1 print:py-0.5 text-center font-semibold">{installment.installmentNumber}/{order.installments}</td>
+                                        <td className="px-2 py-1 print:px-1 print:py-0.5 font-semibold">{format(parseISO(installment.dueDate), 'dd/MM/yy')}</td>
+                                        <td className="px-2 py-1 print:px-1 print:py-0.5 text-right font-mono font-semibold">{formatCurrency(installment.amount)}</td>
+                                        <td className="px-2 py-1 print:px-1 print:py-0.5 border-l">
+                                            {installment.status === 'Pago' 
+                                                ? (installment.paymentDate ? format(parseISO(installment.paymentDate), 'dd/MM/yy') : 'Pago')
+                                                : '\u00A0'
+                                            }
+                                        </td>
+                                        <td className="px-2 py-1 text-center print:hidden">
+                                            {hasPayments && (
+                                                <Button
+                                                    variant="ghost"
+                                                    size="icon"
+                                                    className="h-7 w-7"
+                                                    onClick={() => setExpandedHistory(isExpanded ? null : installment.installmentNumber)}
+                                                    aria-label="Ver histórico de pagamentos"
+                                                >
+                                                    <History className="h-4 w-4" />
+                                                </Button>
+                                            )}
+                                        </td>
+                                    </tr>
+                                    {isExpanded && (
+                                        <tr className="border-b print:hidden">
+                                            <td colSpan={5} className="p-0">
+                                                <div className="bg-muted/30 px-3 py-2">
+                                                    <div className="mb-2 text-sm font-semibold">Histórico de Pagamentos</div>
+                                                    <div className="rounded-md border bg-background">
+                                                        <table className="w-full text-xs">
+                                                            <thead className="bg-muted/50">
+                                                                <tr className="border-b">
+                                                                    <th className="px-2 py-1 text-left font-semibold">Data</th>
+                                                                    <th className="px-2 py-1 text-left font-semibold">Método</th>
+                                                                    <th className="px-2 py-1 text-right font-semibold">Valor</th>
+                                                                    <th className="px-2 py-1 text-left font-semibold">Recebido por</th>
+                                                                </tr>
+                                                            </thead>
+                                                            <tbody>
+                                                                {payments.map((p) => (
+                                                                    <tr key={p.id} className="border-b last:border-none">
+                                                                        <td className="px-2 py-1">{format(parseISO(p.date), 'dd/MM/yy HH:mm', { locale: ptBR })}</td>
+                                                                        <td className="px-2 py-1">{p.method}</td>
+                                                                        <td className="px-2 py-1 text-right font-mono">{formatCurrency(p.amount)}</td>
+                                                                        <td className="px-2 py-1">{p.receivedBy || '-'}</td>
+                                                                    </tr>
+                                                                ))}
+                                                            </tbody>
+                                                        </table>
+                                                    </div>
+                                                </div>
+                                            </td>
+                                        </tr>
+                                    )}
+                                </Fragment>
+                            );
+                        })}
                     </tbody>
                 </table>
             </div>
@@ -226,9 +287,16 @@ const CarnetContent = ({ order, settings, pixPayload, productCodeById }: { order
                         )}
                         <tr className="border-t text-base print:text-sm">
                             <td colSpan={2} className="p-1 text-right">VALOR TOTAL:</td>
-                            <td className="p-1 text-right font-mono">{formatCurrency(valorFinanciado)}</td>
+                            <td className="p-1 text-right font-mono">{formatCurrency(totalPedido)}</td>
                             <td></td>
                         </tr>
+                        {entrada > 0 && (
+                            <tr className="border-t text-base print:text-sm">
+                                <td colSpan={2} className="p-1 text-right">TOTAL A FINANCIAR:</td>
+                                <td className="p-1 text-right font-mono">{formatCurrency(totalFinanciado)}</td>
+                                <td></td>
+                            </tr>
+                        )}
                     </tfoot>
                 </table>
              </div>

@@ -12,9 +12,9 @@ import { Input } from '@/components/ui/input';
 import { useSettings } from '@/context/SettingsContext';
 import { useAdmin, useAdminData } from '@/context/AdminContext';
 import { useAuth } from '@/context/AuthContext';
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useMemo, useState, useRef } from 'react';
 import { Settings, Save, FileDown, Upload, AlertTriangle, RotateCcw, Trash2, Lock, History, User, Calendar, Shield, Image as ImageIcon, Clock, Package, DollarSign, Users, ShoppingCart } from 'lucide-react';
-import type { RolePermissions, UserRole, AppSection, StoreSettings, CustomerInfo } from '@/lib/types';
+import type { RolePermissions, UserRole, AppSection, StoreSettings, CustomerInfo, AsaasSettings } from '@/lib/types';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from '@/components/ui/alert-dialog';
 import { useToast } from '@/hooks/use-toast';
 import { useAudit } from '@/context/AuditContext';
@@ -34,12 +34,16 @@ import { getClientFirebase } from '@/lib/firebase-client';
 import { collection, deleteDoc, doc, getDoc, getDocs, limit, onSnapshot, orderBy, query, setDoc, writeBatch } from 'firebase/firestore';
 import { deleteObject, getDownloadURL, getStorage, ref as storageRef, uploadString } from 'firebase/storage';
 import { maskPhone, onlyDigits } from '@/lib/utils';
+import { isValidPixKey } from '@/lib/pix';
 
 const settingsSchema = z.object({
   storeName: z.string().min(3, 'O nome da loja é obrigatório.'),
   storeAddress: z.string().min(10, 'O endereço da loja é obrigatório.'),
   storeCity: z.string().min(3, 'A cidade da loja é obrigatória.'),
-  pixKey: z.string().min(1, 'A chave PIX é obrigatória.'),
+  pixKey: z
+    .string()
+    .min(1, 'A chave PIX é obrigatória.')
+    .refine((val) => isValidPixKey(val), 'Chave PIX inválida.'),
   storePhone: z.string().refine((val) => {
     const len = onlyDigits(val).length;
     return len >= 10 && len <= 11;
@@ -48,8 +52,12 @@ const settingsSchema = z.object({
   accessControlEnabled: z.boolean().optional(),
   commercialHourStart: z.string().optional(),
   commercialHourEnd: z.string().optional(),
-  stripeEnabled: z.boolean().optional(),
-  mercadopagoEnabled: z.boolean().optional(),
+});
+
+const asaasSchema = z.object({
+  env: z.enum(['sandbox', 'production']).optional(),
+  accessToken: z.string().optional(),
+  webhookToken: z.string().optional(),
 });
 
 type RestorePoint = {
@@ -170,6 +178,7 @@ export default function ConfiguracaoPage() {
   const [restorePointLabel, setRestorePointLabel] = useState('');
   const [restorePointBusyId, setRestorePointBusyId] = useState<string | null>(null);
   const [isCreatingRestorePoint, setIsCreatingRestorePoint] = useState(false);
+  const [isAsaasLoading, setIsAsaasLoading] = useState(false);
 
   const form = useForm<z.infer<typeof settingsSchema>>({
     resolver: zodResolver(settingsSchema),
@@ -183,8 +192,15 @@ export default function ConfiguracaoPage() {
         accessControlEnabled: false,
         commercialHourStart: '08:00',
         commercialHourEnd: '18:00',
-        stripeEnabled: false,
-        mercadopagoEnabled: false,
+    },
+  });
+
+  const asaasForm = useForm<z.infer<typeof asaasSchema>>({
+    resolver: zodResolver(asaasSchema),
+    defaultValues: {
+      env: 'production',
+      accessToken: '',
+      webhookToken: '',
     },
   });
 
@@ -194,8 +210,6 @@ export default function ConfiguracaoPage() {
           ...settings,
           commercialHourStart: settings.commercialHourStart || '08:00',
           commercialHourEnd: settings.commercialHourEnd || '18:00',
-          stripeEnabled: !!settings.stripeEnabled,
-          mercadopagoEnabled: !!settings.mercadopagoEnabled,
       });
     }
   }, [settingsLoading, settings, form]);
@@ -205,6 +219,27 @@ export default function ConfiguracaoPage() {
         setLocalPermissions(JSON.parse(JSON.stringify(permissions)));
     }
   }, [permissionsLoading, permissions]);
+
+  useEffect(() => {
+    if (user?.role !== 'admin') {
+      asaasForm.reset({ env: 'production', accessToken: '', webhookToken: '' });
+      return;
+    }
+    setIsAsaasLoading(true);
+    const { db } = getClientFirebase();
+    const ref = doc(db, 'config', 'asaasSettings');
+    getDoc(ref)
+      .then((snap) => {
+        if (!snap.exists()) return;
+        const data = snap.data() as AsaasSettings;
+        asaasForm.reset({
+          env: data.env || 'production',
+          accessToken: data.accessToken || '',
+          webhookToken: data.webhookToken || '',
+        });
+      })
+      .finally(() => setIsAsaasLoading(false));
+  }, [user?.role, asaasForm]);
 
   useEffect(() => {
     if (user?.role !== 'admin') {
@@ -640,6 +675,35 @@ export default function ConfiguracaoPage() {
       }
   };
 
+  const asaasWebhookUrl = useMemo(() => {
+    if (typeof window === 'undefined') return '';
+    const origin = window.location.origin;
+    return `${origin}/api/asaas/webhook`;
+  }, []);
+
+  const onSubmitAsaas = async (values: z.infer<typeof asaasSchema>) => {
+    if (user?.role !== 'admin') return;
+    try {
+      setIsAsaasLoading(true);
+      const { db } = getClientFirebase();
+      const ref = doc(db, 'config', 'asaasSettings');
+
+      const cleaned: Partial<AsaasSettings> = {};
+      if (values.env) cleaned.env = values.env;
+      if ((values.accessToken || '').trim()) cleaned.accessToken = values.accessToken!.trim();
+      if ((values.webhookToken || '').trim()) cleaned.webhookToken = values.webhookToken!.trim();
+
+      await setDoc(ref, cleaned, { merge: true });
+      logAction('Atualização de Configurações', 'Configurações do Asaas foram alteradas.', user);
+      toast({ title: 'Configurações Salvas!', description: 'As configurações do Asaas foram atualizadas.' });
+    } catch (e) {
+      console.error('Error updating Asaas settings:', e);
+      toast({ title: 'Erro', description: 'Não foi possível salvar as configurações do Asaas.', variant: 'destructive' });
+    } finally {
+      setIsAsaasLoading(false);
+    }
+  };
+
   if (settingsLoading || permissionsLoading) {
     return <p>Carregando configurações...</p>;
   }
@@ -780,46 +844,73 @@ export default function ConfiguracaoPage() {
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
               <DollarSign className="h-6 w-6" />
-              Pagamentos Online
+              Asaas
             </CardTitle>
-            <CardDescription>Ative ou desative opções de pagamento no checkout.</CardDescription>
+            <CardDescription>
+              Configure o ambiente e os tokens do Asaas para cobranças PIX e webhook.
+            </CardDescription>
           </CardHeader>
           <CardContent>
-            <Form {...form}>
-              <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
-                <FormField
-                  control={form.control}
-                  name="stripeEnabled"
-                  render={({ field }) => (
-                    <FormItem className="flex flex-row items-center justify-between rounded-lg border p-4">
-                      <div className="space-y-0.5">
-                        <FormLabel className="text-base">Habilitar Stripe</FormLabel>
-                        <FormDescription>Mostra Stripe no checkout do catálogo online.</FormDescription>
-                      </div>
-                      <FormControl>
-                        <Switch checked={field.value} onCheckedChange={field.onChange} />
-                      </FormControl>
-                    </FormItem>
-                  )}
-                />
-                <FormField
-                  control={form.control}
-                  name="mercadopagoEnabled"
-                  render={({ field }) => (
-                    <FormItem className="flex flex-row items-center justify-between rounded-lg border p-4">
-                      <div className="space-y-0.5">
-                        <FormLabel className="text-base">Habilitar Mercado Pago</FormLabel>
-                        <FormDescription>Mostra Mercado Pago no checkout do catálogo online.</FormDescription>
-                      </div>
-                      <FormControl>
-                        <Switch checked={field.value} onCheckedChange={field.onChange} />
-                      </FormControl>
-                    </FormItem>
-                  )}
-                />
-                <Button type="submit">
+            <Form {...asaasForm}>
+              <form onSubmit={asaasForm.handleSubmit(onSubmitAsaas)} className="space-y-6">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  <FormField
+                    control={asaasForm.control}
+                    name="env"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Ambiente</FormLabel>
+                        <FormControl>
+                          <Input placeholder="sandbox ou production" {...field} />
+                        </FormControl>
+                        <FormDescription>Use sandbox para testes e production para produção.</FormDescription>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                  <FormItem>
+                    <FormLabel>URL do Webhook</FormLabel>
+                    <FormControl>
+                      <Input value={asaasWebhookUrl} readOnly />
+                    </FormControl>
+                    <FormDescription>Cadastre esta URL no painel do Asaas.</FormDescription>
+                  </FormItem>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  <FormField
+                    control={asaasForm.control}
+                    name="accessToken"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Access Token (API Key)</FormLabel>
+                        <FormControl>
+                          <Input type="password" placeholder="Cole aqui sua API Key do Asaas" {...field} />
+                        </FormControl>
+                        <FormDescription>Usado para criar cobranças e obter QR Code PIX.</FormDescription>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                  <FormField
+                    control={asaasForm.control}
+                    name="webhookToken"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Token do Webhook</FormLabel>
+                        <FormControl>
+                          <Input type="password" placeholder="Defina um token e configure no Asaas" {...field} />
+                        </FormControl>
+                        <FormDescription>Valida o header asaas-access-token do webhook.</FormDescription>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                </div>
+
+                <Button type="submit" disabled={isAsaasLoading}>
                   <Save className="mr-2 h-4 w-4" />
-                  Salvar Pagamentos
+                  Salvar Asaas
                 </Button>
               </form>
             </Form>

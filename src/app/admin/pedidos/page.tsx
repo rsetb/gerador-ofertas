@@ -1179,8 +1179,6 @@ Não esqueça de enviar o comprovante!`;
                                                 <SelectItem value="Crediário">Crediário</SelectItem>
                                                 <SelectItem value="Pix">Pix</SelectItem>
                                                 <SelectItem value="Dinheiro">Dinheiro</SelectItem>
-                                                <SelectItem value="Stripe">Stripe</SelectItem>
-                                                <SelectItem value="MercadoPago">Mercado Pago</SelectItem>
                                             </SelectContent>
                                         </Select>
                                     </div>
