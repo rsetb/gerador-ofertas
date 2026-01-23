@@ -1,4 +1,6 @@
 import { EventEmitter } from 'events';
+import fs from 'fs';
+import path from 'path';
 import { Client, LocalAuth, MessageMedia } from 'whatsapp-web.js';
 
 type WhatsAppConnectionStatus = 'idle' | 'initializing' | 'qr' | 'ready' | 'disconnected' | 'error';
@@ -32,8 +34,19 @@ declare global {
 }
 
 const createClient = () => {
+  const isServerless =
+    !!process.env.VERCEL ||
+    !!process.env.AWS_LAMBDA_FUNCTION_NAME ||
+    !!process.env.LAMBDA_TASK_ROOT ||
+    !!process.env.NOW_REGION;
+
+  const authDir = isServerless ? path.join('/tmp', '.wwebjs_auth') : path.join(process.cwd(), '.wwebjs_auth');
+  try {
+    fs.mkdirSync(authDir, { recursive: true });
+  } catch {}
+
   return new Client({
-    authStrategy: new LocalAuth({ clientId: 'adceletrodomesticos' }),
+    authStrategy: new LocalAuth({ clientId: 'adceletrodomesticos', dataPath: authDir }),
     puppeteer: { headless: true, args: ['--no-sandbox', '--disable-setuid-sandbox'] },
   });
 };
