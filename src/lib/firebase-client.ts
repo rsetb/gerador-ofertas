@@ -1,7 +1,7 @@
 // /src/lib/firebase-client.ts
 'use client';
 import { initializeApp, getApps, getApp, FirebaseApp } from "firebase/app";
-import { getFirestore, Firestore } from "firebase/firestore";
+import { enableIndexedDbPersistence, getFirestore, initializeFirestore, Firestore } from "firebase/firestore";
 import { getAuth, Auth } from "firebase/auth";
 
 const firebaseConfig = {
@@ -17,6 +17,7 @@ const firebaseConfig = {
 let app: FirebaseApp;
 let auth: Auth;
 let db: Firestore;
+let persistenceEnabled = false;
 
 function initializeClientFirebase() {
   if (typeof window !== "undefined") {
@@ -26,7 +27,20 @@ function initializeClientFirebase() {
       app = getApp();
     }
     auth = getAuth(app);
-    db = getFirestore(app);
+    if (!db) {
+      try {
+        db = initializeFirestore(app, {
+          experimentalAutoDetectLongPolling: true,
+        });
+      } catch {
+        db = getFirestore(app);
+      }
+    }
+
+    if (!persistenceEnabled) {
+      persistenceEnabled = true;
+      enableIndexedDbPersistence(db).catch(() => {});
+    }
   }
 }
 

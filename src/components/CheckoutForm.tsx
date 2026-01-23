@@ -63,11 +63,11 @@ const checkoutSchema = z.object({
   }, 'CEP inválido. Deve conter 8 dígitos.'),
   address: z.string().min(3, 'Endereço é obrigatório.'),
   number: z.string().min(1, 'Número é obrigatório.'),
-  complement: z.string().min(1, 'Complemento é obrigatório.'),
+  complement: z.string().optional().or(z.literal('')),
   neighborhood: z.string().min(2, 'Bairro é obrigatório.'),
   city: z.string().min(2, 'Cidade é obrigatória.'),
   state: z.string().min(2, 'Estado é obrigatória.'),
-  observations: z.string().min(1, 'Observações são obrigatórias.'),
+  observations: z.string().optional().or(z.literal('')),
   paymentMethod: z.enum(['Crediário', 'Pix', 'Dinheiro']),
   sellerId: z.string().optional(),
   sellerName: z.string().optional(),
@@ -186,6 +186,8 @@ export default function CheckoutForm() {
               ...existingCustomer,
               cpf: existingCustomer.cpf || maskedValue,
               code: existingCustomer.code || '',
+              complement: existingCustomer.complement || '',
+              observations: existingCustomer.observations || '',
             });
             setIsNewCustomer(false);
             toast({
@@ -214,8 +216,8 @@ export default function CheckoutForm() {
       const productInfo = products.find(p => p.id === item.id);
       return {
         ...item,
-        stock: productInfo?.stock ?? 0,
-        hasEnoughStock: (productInfo?.stock ?? 0) >= item.quantity,
+        stock: typeof productInfo?.stock === 'number' ? productInfo.stock : null,
+        hasEnoughStock: typeof productInfo?.stock === 'number' ? productInfo.stock >= item.quantity : true,
         maxInstallments: productInfo?.maxInstallments ?? 1,
       };
     });
@@ -287,9 +289,11 @@ export default function CheckoutForm() {
     const { sellerId: formSellerId, sellerName: formSellerName, paymentMethod: formPaymentMethod, ...customerValues } = values;
 
     const customerData: CustomerInfo = customerValues;
+    const cpfDigits = onlyDigits(customerData.cpf || '');
+    customerData.cpf = cpfDigits;
     
-    if (customerData.cpf && isNewCustomer) {
-        customerData.password = customerData.cpf.substring(0, 6);
+    if (cpfDigits && isNewCustomer) {
+        customerData.password = cpfDigits.slice(0, 6);
     }
     
     const finalPaymentMethod = formPaymentMethod as PaymentMethod;
@@ -332,7 +336,6 @@ export default function CheckoutForm() {
         const prefix = order.items && order.items.length > 0 ? 'PED' : 'REG';
         const orderId = `${prefix}-${Date.now().toString().slice(-6)}`;
 
-        const cpfDigits = onlyDigits(customerData.cpf || '');
         let code = (customerData.code || '').trim();
 
         if (!code) {
@@ -341,6 +344,8 @@ export default function CheckoutForm() {
           const fromDoc = snap?.exists() ? String((snap.data() as any)?.code || '') : '';
           code = fromDoc.trim() || (await allocateNextCustomerCode(db));
         }
+
+        const now = new Date().toISOString();
 
         const orderToSave: Order = {
           ...(order as any),
@@ -364,6 +369,19 @@ export default function CheckoutForm() {
         const orderRef = doc(db, 'orders', orderId);
 
         await runTransaction(db, async (tx) => {
+          if (cpfDigits.length === 11) {
+            const customerRef = doc(db, 'customers', cpfDigits);
+            tx.set(
+              customerRef,
+              {
+                ...sanitizeCustomerForFirestore(orderToSave.customer),
+                updatedAt: now,
+                ...(isNewCustomer ? { createdAt: now } : {}),
+              },
+              { merge: true }
+            );
+          }
+
           for (const item of orderToSave.items) {
             const productRef = doc(db, 'products', item.id);
             const productSnap = await tx.get(productRef);
@@ -437,9 +455,16 @@ export default function CheckoutForm() {
         }
     } catch (error) {
         console.error("Failed to process order:", error);
+        const isQuotaExceeded = () => {
+          const message = error instanceof Error ? error.message : '';
+          const code = typeof error === 'object' && error !== null && 'code' in error ? String((error as any).code) : '';
+          return code === 'resource-exhausted' || /quota exceeded/i.test(message);
+        };
         toast({
             title: "Erro ao Finalizar Pedido",
-            description: error instanceof Error ? error.message : "Não foi possível completar o pedido.",
+            description: isQuotaExceeded()
+              ? "Limite do Firebase atingido (quota). Tente novamente mais tarde."
+              : (error instanceof Error ? error.message : "Não foi possível completar o pedido."),
             variant: "destructive"
         });
     }
@@ -592,7 +617,7 @@ export default function CheckoutForm() {
                     <FormField control={form.control} name="zip" render={({ field }) => ( <FormItem className="md:col-span-2"><FormLabel>CEP <span className="text-destructive">*</span></FormLabel><FormControl><Input placeholder="00000-000" {...field} onBlur={handleZipBlur} /></FormControl><FormMessage /></FormItem> )} />
                     <FormField control={form.control} name="address" render={({ field }) => ( <FormItem className="md:col-span-4"><FormLabel>Endereço <span className="text-destructive">*</span></FormLabel><FormControl><Input placeholder="Rua, Av." {...field} /></FormControl><FormMessage /></FormItem> )} />
                     <FormField control={form.control} name="number" render={({ field }) => ( <FormItem className="md:col-span-2"><FormLabel>Número <span className="text-destructive">*</span></FormLabel><FormControl><Input placeholder="123" {...field} /></FormControl><FormMessage /></FormItem> )} />
-                    <FormField control={form.control} name="complement" render={({ field }) => ( <FormItem className="md:col-span-4"><FormLabel>Complemento <span className="text-destructive">*</span></FormLabel><FormControl><Input placeholder="Apto, bloco, casa, etc." {...field} /></FormControl><FormMessage /></FormItem> )} />
+                    <FormField control={form.control} name="complement" render={({ field }) => ( <FormItem className="md:col-span-4"><FormLabel>Complemento</FormLabel><FormControl><Input placeholder="Apto, bloco, casa, etc." {...field} /></FormControl><FormMessage /></FormItem> )} />
                     <FormField control={form.control} name="neighborhood" render={({ field }) => ( <FormItem className="md:col-span-3"><FormLabel>Bairro <span className="text-destructive">*</span></FormLabel><FormControl><Input {...field} /></FormControl><FormMessage /></FormItem> )} />
                     <FormField control={form.control} name="city" render={({ field }) => ( <FormItem className="md:col-span-3"><FormLabel>Cidade <span className="text-destructive">*</span></FormLabel><FormControl><Input {...field} /></FormControl><FormMessage /></FormItem> )} />
                     <FormField control={form.control} name="state" render={({ field }) => ( <FormItem className="md:col-span-6"><FormLabel>Estado <span className="text-destructive">*</span></FormLabel><FormControl><Input {...field} /></FormControl><FormMessage /></FormItem> )} />
@@ -602,7 +627,7 @@ export default function CheckoutForm() {
                     name="observations"
                     render={({ field }) => (
                         <FormItem>
-                            <FormLabel>Observações <span className="text-destructive">*</span></FormLabel>
+                            <FormLabel>Observações</FormLabel>
                             <FormControl>
                                 <Textarea placeholder="Ex: Deixar na portaria, ponto de referência..." {...field} />
                             </FormControl>

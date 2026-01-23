@@ -494,14 +494,13 @@ function CustomersAdminPageInner() {
     setIsAddCustomerDialogOpen(false);
   };
   
-  const handleSendWhatsAppReminder = (order: Order, installment: Installment) => {
-    if (!settings.wapiInstance || !settings.wapiToken) {
-        const customerName = order.customer.name.split(' ')[0];
-        const customerPhone = order.customer.phone.replace(/\D/g, '');
-        const dueDate = format(parseISO(installment.dueDate), 'dd/MM/yyyy', { locale: ptBR });
-        const amount = formatCurrency(installment.amount - (installment.paidAmount || 0));
-        
-        const message = `Olá, ${customerName}! Passando para lembrar sobre o vencimento da sua parcela nº ${installment.installmentNumber} do seu carnê (pedido ${order.id}).
+  const handleSendWhatsAppReminder = async (order: Order, installment: Installment) => {
+    const customerName = order.customer.name.split(' ')[0];
+    const customerPhone = onlyDigits(order.customer.phone);
+    const dueDate = format(parseISO(installment.dueDate), 'dd/MM/yyyy', { locale: ptBR });
+    const amount = formatCurrency(installment.amount - (installment.paidAmount || 0));
+    
+    const message = `Olá, ${customerName}! Passando para lembrar sobre o vencimento da sua parcela nº ${installment.installmentNumber} do seu carnê (pedido ${order.id}).
 
 Vencimento: *${dueDate}*
 Valor: *${amount}*
@@ -511,11 +510,29 @@ Adriano Cavalcante de Oliveira
 Banco: Nubank 
 
 Não esqueça de enviar o comprovante!`;
-        
-        const whatsappUrl = `https://wa.me/55${customerPhone}?text=${encodeURIComponent(message)}`;
-        window.open(whatsappUrl, '_blank');
-    } else {
-        // W-API logic would go here
+
+    try {
+      const res = await fetch('/api/whatsapp/send', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-admin-request': '1' },
+        body: JSON.stringify({ number: customerPhone, message }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => null);
+        throw new Error(String(data?.error || 'Não foi possível enviar no WhatsApp.'));
+      }
+      toast({ title: 'WhatsApp enviado', description: 'Mensagem enviada automaticamente para o cliente.' });
+    } catch (e) {
+      let waPhone = customerPhone;
+      while (waPhone.startsWith('55') && waPhone.length > 13) waPhone = waPhone.slice(2);
+      if (!waPhone.startsWith('55') && (waPhone.length === 10 || waPhone.length === 11)) waPhone = `55${waPhone}`;
+      const whatsappUrl = `https://wa.me/${waPhone}?text=${encodeURIComponent(message)}`;
+      window.open(whatsappUrl, '_blank');
+      toast({
+        title: 'Envio automático falhou',
+        description: e instanceof Error ? e.message : 'Abrindo WhatsApp Web para enviar manualmente.',
+        variant: 'destructive',
+      });
     }
   };
 

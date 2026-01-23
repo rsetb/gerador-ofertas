@@ -54,7 +54,7 @@ import { WhatsAppIcon } from '@/components/WhatsAppIcon';
 import { useSettings } from '@/context/SettingsContext';
 import Logo from '@/components/Logo';
 import { Textarea } from '@/components/ui/textarea';
-import { cn } from '@/lib/utils';
+import { cn, onlyDigits } from '@/lib/utils';
 import { getClientFirebase } from '@/lib/firebase-client';
 import { collection, query, orderBy, onSnapshot } from 'firebase/firestore';
 
@@ -466,9 +466,9 @@ export default function OrdersAdminPage() {
     emptyTrash(logAction, user);
   }
   
-  const handleSendWhatsAppReminder = (order: Order, installment: Installment) => {
+  const handleSendWhatsAppReminder = async (order: Order, installment: Installment) => {
     const customerName = order.customer.name.split(' ')[0];
-    const customerPhone = order.customer.phone.replace(/\D/g, '');
+    const customerPhone = onlyDigits(order.customer.phone);
     const dueDate = format(parseISO(installment.dueDate), 'dd/MM/yyyy', { locale: ptBR });
     const amount = formatCurrency(installment.amount - (installment.paidAmount || 0));
     const productNames = order.items.map(item => item.name).join(', ');
@@ -484,8 +484,29 @@ Banco: Nubank
 
 Não esqueça de enviar o comprovante!`;
     
-    const whatsappUrl = `https://wa.me/55${customerPhone}?text=${encodeURIComponent(message)}`;
-    window.open(whatsappUrl, '_blank');
+    try {
+      const res = await fetch('/api/whatsapp/send', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-admin-request': '1' },
+        body: JSON.stringify({ number: customerPhone, message }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => null);
+        throw new Error(String(data?.error || 'Não foi possível enviar no WhatsApp.'));
+      }
+      toast({ title: 'WhatsApp enviado', description: 'Mensagem enviada automaticamente para o cliente.' });
+    } catch (e) {
+      let waPhone = customerPhone;
+      while (waPhone.startsWith('55') && waPhone.length > 13) waPhone = waPhone.slice(2);
+      if (!waPhone.startsWith('55') && (waPhone.length === 10 || waPhone.length === 11)) waPhone = `55${waPhone}`;
+      const whatsappUrl = `https://wa.me/${waPhone}?text=${encodeURIComponent(message)}`;
+      window.open(whatsappUrl, '_blank');
+      toast({
+        title: 'Envio automático falhou',
+        description: e instanceof Error ? e.message : 'Abrindo WhatsApp Web para enviar manualmente.',
+        variant: 'destructive',
+      });
+    }
   };
 
   const handlePrintOverdueReport = () => {

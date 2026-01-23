@@ -163,7 +163,7 @@ function AuditLogCard() {
 
 export default function ConfiguracaoPage() {
   const { settings, updateSettings, isLoading: settingsLoading, restoreSettings, resetSettings } = useSettings();
-  const { restoreAdminData, resetOrders, resetProducts, resetFinancials, resetAllAdminData } = useAdmin();
+  const { restoreAdminData, resetOrders, resetProducts, resetFinancials, resetAllAdminData, fetchBackupData } = useAdmin();
   const { products, categories } = useData();
   const { orders, customers, deletedCustomers, commissionPayments, stockAudits, avarias, chatSessions } = useAdminData();
   const { user, users, restoreUsers } = useAuth();
@@ -179,6 +179,11 @@ export default function ConfiguracaoPage() {
   const [restorePointBusyId, setRestorePointBusyId] = useState<string | null>(null);
   const [isCreatingRestorePoint, setIsCreatingRestorePoint] = useState(false);
   const [isAsaasLoading, setIsAsaasLoading] = useState(false);
+  const [whatsAppStatus, setWhatsAppStatus] = useState<'idle' | 'initializing' | 'qr' | 'ready' | 'disconnected' | 'error'>('idle');
+  const [whatsAppQr, setWhatsAppQr] = useState<string | null>(null);
+  const [whatsAppQrDataUrl, setWhatsAppQrDataUrl] = useState<string | null>(null);
+  const [whatsAppLastError, setWhatsAppLastError] = useState<string | null>(null);
+  const [isWhatsAppStarting, setIsWhatsAppStarting] = useState(false);
 
   const form = useForm<z.infer<typeof settingsSchema>>({
     resolver: zodResolver(settingsSchema),
@@ -243,6 +248,161 @@ export default function ConfiguracaoPage() {
 
   useEffect(() => {
     if (user?.role !== 'admin') {
+      setWhatsAppStatus('idle');
+      setWhatsAppQr(null);
+      setWhatsAppQrDataUrl(null);
+      setWhatsAppLastError(null);
+      return () => {};
+    }
+
+    let cancelled = false;
+    const updateFromStatus = (payload: any) => {
+      const status = String(payload?.status || 'idle') as any;
+      const qr = typeof payload?.qr === 'string' ? payload.qr : null;
+      const lastError = typeof payload?.lastError === 'string' ? payload.lastError : null;
+
+      setWhatsAppStatus(status);
+      setWhatsAppQr(qr);
+      setWhatsAppLastError(lastError);
+    };
+
+    fetch('/api/whatsapp/status')
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (cancelled || !data) return;
+        updateFromStatus(data);
+      })
+      .catch(() => {});
+
+    const es = new EventSource('/api/whatsapp/events');
+
+    const onState = (ev: MessageEvent) => {
+      try {
+        const data = JSON.parse(ev.data);
+        if (cancelled) return;
+        updateFromStatus(data);
+      } catch {}
+    };
+
+    const onQr = (ev: MessageEvent) => {
+      try {
+        const data = JSON.parse(ev.data);
+        if (cancelled) return;
+        setWhatsAppStatus('qr');
+        setWhatsAppQr(typeof data?.qr === 'string' ? data.qr : null);
+        setWhatsAppLastError(null);
+      } catch {}
+    };
+
+    const onReady = () => {
+      if (cancelled) return;
+      setWhatsAppStatus('ready');
+      setWhatsAppQr(null);
+      setWhatsAppLastError(null);
+    };
+
+    const onDisconnected = (ev: MessageEvent) => {
+      try {
+        const data = JSON.parse(ev.data);
+        if (cancelled) return;
+        setWhatsAppStatus('disconnected');
+        setWhatsAppLastError(typeof data?.reason === 'string' ? data.reason : null);
+      } catch {}
+    };
+
+    const onAuthFailure = (ev: MessageEvent) => {
+      try {
+        const data = JSON.parse(ev.data);
+        if (cancelled) return;
+        setWhatsAppStatus('error');
+        setWhatsAppLastError(typeof data?.message === 'string' ? data.message : 'auth_failure');
+      } catch {}
+    };
+
+    const onError = (ev: MessageEvent) => {
+      try {
+        const data = JSON.parse(ev.data);
+        if (cancelled) return;
+        setWhatsAppStatus('error');
+        setWhatsAppLastError(typeof data?.message === 'string' ? data.message : 'Erro no WhatsApp.');
+      } catch {}
+    };
+
+    es.addEventListener('state', onState as any);
+    es.addEventListener('qr', onQr as any);
+    es.addEventListener('ready', onReady as any);
+    es.addEventListener('disconnected', onDisconnected as any);
+    es.addEventListener('auth_failure', onAuthFailure as any);
+    es.addEventListener('error', onError as any);
+
+    return () => {
+      cancelled = true;
+      es.close();
+    };
+  }, [user?.role]);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!whatsAppQr) {
+      setWhatsAppQrDataUrl(null);
+      return () => {};
+    }
+
+    import('qrcode')
+      .then(async (mod) => {
+        const toDataURL = (mod as any)?.toDataURL as undefined | ((text: string, opts?: any) => Promise<string>);
+        if (!toDataURL) return;
+        const url = await toDataURL(whatsAppQr, { margin: 1, width: 240 });
+        if (cancelled) return;
+        setWhatsAppQrDataUrl(url);
+      })
+      .catch(() => {});
+
+    return () => {
+      cancelled = true;
+    };
+  }, [whatsAppQr]);
+
+  const normalizeWhatsAppError = (raw: unknown) => {
+    const msg = typeof raw === 'string' ? raw.trim() : '';
+    if (!msg) return 'Não foi possível conectar ao WhatsApp.';
+    if (/browser is already running/i.test(msg) || /userDataDir/i.test(msg)) {
+      return 'Já existe uma sessão do WhatsApp em execução neste computador. Feche o navegador/Chrome aberto pelo WhatsApp ou pare o servidor antigo e tente novamente.';
+    }
+    return msg;
+  };
+
+  const startWhatsAppConnection = async (force?: boolean) => {
+    try {
+      setIsWhatsAppStarting(true);
+      const url = force ? '/api/whatsapp/start?force=1' : '/api/whatsapp/start';
+      const res = await fetch(url, { method: 'GET' });
+      const data = res.ok ? await res.json().catch(() => null) : null;
+      if (!res.ok) {
+        toast({ title: 'Erro', description: 'Não foi possível iniciar o WhatsApp.', variant: 'destructive' });
+        return;
+      }
+      if (data) {
+        const status = String(data?.status || '');
+        if (status === 'ready') {
+          toast({ title: 'WhatsApp conectado', description: 'Conexão pronta para uso.' });
+        } else if (status === 'qr') {
+          toast({ title: 'QR Code gerado', description: 'Escaneie o QR Code no seu WhatsApp.' });
+        } else if (status === 'error') {
+          toast({ title: 'Erro ao conectar', description: normalizeWhatsAppError(data?.lastError), variant: 'destructive' });
+        } else {
+          toast({ title: 'WhatsApp', description: 'Inicializando conexão...' });
+        }
+      }
+    } catch {
+      toast({ title: 'Erro', description: 'Falha ao iniciar o WhatsApp.', variant: 'destructive' });
+    } finally {
+      setIsWhatsAppStarting(false);
+    }
+  };
+
+  useEffect(() => {
+    if (user?.role !== 'admin') {
       setRestorePoints([]);
       return;
     }
@@ -292,10 +452,18 @@ export default function ConfiguracaoPage() {
     toast({ title: 'Exportação Concluída!', description: `O arquivo ${filename} foi baixado.` });
   };
 
+  const isQuotaExceeded = (error: unknown) => {
+    const message = error instanceof Error ? error.message : '';
+    const code = typeof error === 'object' && error !== null && 'code' in error ? String((error as any).code) : '';
+    return code === 'resource-exhausted' || /quota exceeded/i.test(message);
+  };
+
   const buildFullBackup = async () => {
     const { db } = getClientFirebase();
     const customerCodeCounterSnap = await getDoc(doc(db, 'config', 'customerCodeCounter'));
     const customerCodeCounter = customerCodeCounterSnap.exists() ? customerCodeCounterSnap.data() : null;
+
+    const adminData = await fetchBackupData();
 
     return {
       version: 1,
@@ -305,13 +473,13 @@ export default function ConfiguracaoPage() {
       customerCodeCounter,
       products,
       categories,
-      orders,
-      customers,
-      customersTrash: deletedCustomers,
+      orders: adminData.orders,
+      customers: adminData.customers,
+      customersTrash: adminData.customersTrash,
       users,
-      commissionPayments,
-      stockAudits,
-      avarias,
+      commissionPayments: adminData.commissionPayments,
+      stockAudits: adminData.stockAudits,
+      avarias: adminData.avarias,
       chatSessions,
     };
   };
@@ -349,7 +517,45 @@ export default function ConfiguracaoPage() {
       handleExport(backup, 'backup-completo');
     } catch (error) {
       console.error("Failed to export full backup:", error);
-      toast({ title: 'Erro ao Exportar', description: 'Não foi possível gerar o backup completo.', variant: 'destructive' });
+      toast({
+        title: 'Erro ao Exportar',
+        description: isQuotaExceeded(error)
+          ? 'Limite do Firebase atingido (quota). Tente novamente mais tarde.'
+          : 'Não foi possível gerar o backup completo.',
+        variant: 'destructive',
+      });
+    }
+  };
+
+  const handleExportOrders = async () => {
+    try {
+      const adminData = await fetchBackupData();
+      handleExport(adminData.orders, 'pedidos');
+    } catch (error) {
+      console.error('Failed to export orders:', error);
+      toast({
+        title: 'Erro ao Exportar',
+        description: isQuotaExceeded(error)
+          ? 'Limite do Firebase atingido (quota). Tente novamente mais tarde.'
+          : 'Não foi possível exportar os pedidos.',
+        variant: 'destructive',
+      });
+    }
+  };
+
+  const handleExportCustomers = async () => {
+    try {
+      const adminData = await fetchBackupData();
+      handleExport(adminData.customers, 'clientes');
+    } catch (error) {
+      console.error('Failed to export customers:', error);
+      toast({
+        title: 'Erro ao Exportar',
+        description: isQuotaExceeded(error)
+          ? 'Limite do Firebase atingido (quota). Tente novamente mais tarde.'
+          : 'Não foi possível exportar os clientes.',
+        variant: 'destructive',
+      });
     }
   };
 
@@ -519,7 +725,13 @@ export default function ConfiguracaoPage() {
           await setDoc(doc(db, 'restorePoints', restorePointId), { status: 'failed' }, { merge: true });
         }
       } catch {}
-      toast({ title: 'Erro', description: 'Não foi possível criar o ponto de restauração.', variant: 'destructive' });
+      toast({
+        title: 'Erro',
+        description: isQuotaExceeded(error)
+          ? 'Limite do Firebase atingido (quota). Tente novamente mais tarde.'
+          : 'Não foi possível criar o ponto de restauração.',
+        variant: 'destructive',
+      });
     } finally {
       setIsCreatingRestorePoint(false);
     }
@@ -710,6 +922,31 @@ export default function ConfiguracaoPage() {
 
   const logoPreview = form.watch('logoUrl');
   const accessControlEnabled = form.watch('accessControlEnabled');
+  const whatsAppStatusLabel = (() => {
+    switch (whatsAppStatus) {
+      case 'ready':
+        return 'Conectado';
+      case 'qr':
+        return 'Aguardando QR';
+      case 'initializing':
+        return 'Inicializando';
+      case 'disconnected':
+        return 'Desconectado';
+      case 'error':
+        return 'Erro';
+      default:
+        return 'Parado';
+    }
+  })();
+
+  const whatsAppStatusVariant =
+    whatsAppStatus === 'ready'
+      ? ('default' as const)
+      : whatsAppStatus === 'qr' || whatsAppStatus === 'initializing'
+        ? ('secondary' as const)
+        : whatsAppStatus === 'error' || whatsAppStatus === 'disconnected'
+          ? ('destructive' as const)
+          : ('outline' as const);
 
 
   return (
@@ -838,6 +1075,71 @@ export default function ConfiguracaoPage() {
           </Form>
         </CardContent>
       </Card>
+
+      {user?.role === 'admin' && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <WhatsAppIcon className="h-6 w-6" />
+              WhatsApp
+            </CardTitle>
+            <CardDescription>
+              Conecte o WhatsApp para envio e recebimento de mensagens (QR Code).
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div className="flex flex-wrap items-center gap-2">
+                <Badge variant={whatsAppStatusVariant}>{whatsAppStatusLabel}</Badge>
+                {whatsAppLastError && <Badge variant="destructive">{whatsAppLastError}</Badge>}
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <Button
+                  type="button"
+                  onClick={() => startWhatsAppConnection(false)}
+                  disabled={isWhatsAppStarting || whatsAppStatus === 'initializing'}
+                >
+                  {isWhatsAppStarting ? 'Iniciando...' : 'Iniciar / Gerar QR'}
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => startWhatsAppConnection(true)}
+                  disabled={isWhatsAppStarting || whatsAppStatus === 'initializing'}
+                >
+                  Reiniciar
+                </Button>
+              </div>
+            </div>
+
+            {whatsAppStatus === 'ready' && (
+              <div className="rounded-md border p-4">
+                <p className="font-medium">Conectado</p>
+                <p className="text-sm text-muted-foreground">
+                  O WhatsApp está pronto. Se precisar reconectar, clique em “Iniciar / Gerar QR”.
+                </p>
+              </div>
+            )}
+
+            {whatsAppStatus !== 'ready' && whatsAppQrDataUrl && (
+              <div className="flex flex-col items-center gap-3 rounded-md border p-4">
+                <img src={whatsAppQrDataUrl} alt="QR Code do WhatsApp" className="h-[240px] w-[240px]" />
+                <p className="text-sm text-muted-foreground text-center">
+                  No celular: WhatsApp → Aparelhos conectados → Conectar um aparelho → Escaneie o QR Code.
+                </p>
+              </div>
+            )}
+
+            {whatsAppStatus !== 'ready' && !whatsAppQrDataUrl && (
+              <div className="rounded-md border p-4">
+                <p className="text-sm text-muted-foreground">
+                  Clique em “Iniciar / Gerar QR” para iniciar a conexão e obter o QR Code.
+                </p>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
 
       {user?.role === 'admin' && (
         <Card>
@@ -1118,11 +1420,11 @@ export default function ConfiguracaoPage() {
                         <FileDown className="mr-2 h-4 w-4" />
                         Baixar Backup Completo
                     </Button>
-                    <Button variant="outline" onClick={() => handleExport(orders, 'pedidos')}>
+                    <Button variant="outline" onClick={handleExportOrders}>
                         <ShoppingCart className="mr-2 h-4 w-4" />
                         Exportar Pedidos
                     </Button>
-                    <Button variant="outline" onClick={() => handleExport(customers, 'clientes')}>
+                    <Button variant="outline" onClick={handleExportCustomers}>
                         <Users className="mr-2 h-4 w-4" />
                         Exportar Clientes
                     </Button>

@@ -3,11 +3,11 @@
 'use client';
 
 import React, { createContext, useContext, useState, useEffect, ReactNode, useMemo } from 'react';
-import { useRouter } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
 import { useToast } from '@/hooks/use-toast';
 import type { CustomerInfo, Order } from '@/lib/types';
 import { getClientFirebase } from '@/lib/firebase-client';
-import { collection, query, where, onSnapshot, getDocs } from 'firebase/firestore';
+import { collection, query, where, getDocs } from 'firebase/firestore';
 
 interface CustomerAuthContextType {
   customer: CustomerInfo | null;
@@ -20,12 +20,52 @@ interface CustomerAuthContextType {
 
 const CustomerAuthContext = createContext<CustomerAuthContextType | undefined>(undefined);
 
+const CUSTOMER_ORDERS_CACHE_TTL_MS = 5 * 60 * 1000;
+
 export const CustomerAuthProvider = ({ children }: { children: ReactNode }) => {
   const [customer, setCustomer] = useState<CustomerInfo | null>(null);
   const [customerOrders, setCustomerOrders] = useState<Order[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const router = useRouter();
+  const pathname = usePathname();
   const { toast } = useToast();
+
+  const isQuotaExceeded = (error: unknown) => {
+    const message = error instanceof Error ? error.message : '';
+    const code = typeof error === 'object' && error !== null && 'code' in error ? String((error as any).code) : '';
+    return code === 'resource-exhausted' || /quota exceeded/i.test(message);
+  };
+
+  const readOrdersCache = (cpf: string): Order[] | null => {
+    if (typeof window === 'undefined') return null;
+    try {
+      const raw = localStorage.getItem(`adcpro/customerOrders/${cpf}`);
+      if (!raw) return null;
+      const parsed = JSON.parse(raw) as Order[];
+      return Array.isArray(parsed) ? parsed : null;
+    } catch {
+      return null;
+    }
+  };
+
+  const readOrdersCacheTs = (cpf: string): number | null => {
+    if (typeof window === 'undefined') return null;
+    try {
+      const raw = localStorage.getItem(`adcpro/customerOrders/${cpf}__ts`);
+      const ts = raw ? Number(raw) : NaN;
+      return Number.isFinite(ts) ? ts : null;
+    } catch {
+      return null;
+    }
+  };
+
+  const writeOrdersCache = (cpf: string, orders: Order[]) => {
+    if (typeof window === 'undefined') return;
+    try {
+      localStorage.setItem(`adcpro/customerOrders/${cpf}`, JSON.stringify(orders));
+      localStorage.setItem(`adcpro/customerOrders/${cpf}__ts`, String(Date.now()));
+    } catch {}
+  };
   
   useEffect(() => {
     setIsLoading(true);
@@ -43,24 +83,53 @@ export const CustomerAuthProvider = ({ children }: { children: ReactNode }) => {
   }, []);
 
   useEffect(() => {
+    if (!pathname.startsWith('/area-cliente')) {
+        return;
+    }
     if (!customer?.cpf) {
         setCustomerOrders([]);
         return;
     }
 
-    const { db } = getClientFirebase();
-    const ordersRef = collection(db, 'orders');
-    const q = query(ordersRef, where('customer.cpf', '==', customer.cpf));
-    
-    const unsubscribe = onSnapshot(q, (querySnapshot) => {
-        const ordersData = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Order));
-        setCustomerOrders(ordersData);
-    }, (error) => {
-        console.error("Error fetching customer orders: ", error);
-    });
+    const cpf = customer.cpf.replace(/\D/g, '');
+    const now = Date.now();
+    const cached = readOrdersCache(cpf);
+    const cachedTs = readOrdersCacheTs(cpf);
+    const hasFreshCache = cachedTs !== null && now - cachedTs < CUSTOMER_ORDERS_CACHE_TTL_MS;
 
-    return () => unsubscribe();
-  }, [customer]);
+    if (cached && cached.length > 0) {
+      setCustomerOrders(cached);
+      if (hasFreshCache) return;
+    }
+
+    void (async () => {
+      const { db } = getClientFirebase();
+      const ordersRef = collection(db, 'orders');
+      const q = query(ordersRef, where('customer.cpf', '==', cpf));
+
+      try {
+        const querySnapshot = await getDocs(q);
+        const ordersData = querySnapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() } as Order));
+        setCustomerOrders(ordersData);
+        writeOrdersCache(cpf, ordersData);
+      } catch (error) {
+        console.error('Error fetching customer orders: ', error);
+        if (isQuotaExceeded(error)) {
+          const fallback = readOrdersCache(cpf);
+          if (fallback && fallback.length > 0) {
+            setCustomerOrders(fallback);
+          }
+          toast({
+            title: 'Indisponível no momento',
+            description: 'Limite do Firebase atingido (quota). Tente novamente mais tarde.',
+            variant: 'destructive',
+          });
+        }
+      }
+    })();
+
+    return () => {};
+  }, [customer, pathname]);
 
   const login = async (cpf: string, pass: string): Promise<boolean> => {
     const { db } = getClientFirebase();

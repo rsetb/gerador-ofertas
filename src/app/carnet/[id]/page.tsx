@@ -3,19 +3,21 @@
 'use client';
 
 import { useParams } from 'next/navigation';
-import { Fragment, useMemo, useState, useEffect } from 'react';
+import { Fragment, useMemo, useState, useEffect, useRef } from 'react';
 import type { Order, StoreSettings } from '@/lib/types';
 import { Button } from '@/components/ui/button';
-import { ArrowLeft, Printer, ShoppingCart, Phone, History } from 'lucide-react';
+import { ArrowLeft, Printer, ShoppingCart, Phone, History, Send } from 'lucide-react';
 import Logo from '@/components/Logo';
 import { format, parseISO } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { generatePixPayload } from '@/lib/pix';
 import PixQRCode from '@/components/PixQRCode';
-import { cn } from '@/lib/utils';
+import { cn, onlyDigits } from '@/lib/utils';
 import { getClientFirebase } from '@/lib/firebase-client';
 import { doc, getDoc } from 'firebase/firestore';
 import { useData } from '@/context/DataContext';
+import html2canvas from 'html2canvas';
+import { useToast } from '@/hooks/use-toast';
 
 
 const formatCurrency = (value: number) => {
@@ -326,6 +328,9 @@ export default function CarnetPage() {
   const [settings, setSettings] = useState<StoreSettings>(initialSettings);
   const [isLoading, setIsLoading] = useState(true);
   const { products } = useData();
+  const { toast } = useToast();
+  const carnetRef = useRef<HTMLElement | null>(null);
+  const [isSendingPrint, setIsSendingPrint] = useState(false);
 
   useEffect(() => {
     const orderId = params.id as string;
@@ -439,6 +444,124 @@ export default function CarnetPage() {
     }, 100);
   };
 
+  const resolveCustomerPhoneDigits = (o: Order) => {
+    const candidates = [o.customer?.phone, o.customer?.phone2, o.customer?.phone3];
+    for (const candidate of candidates) {
+      const digits = onlyDigits(candidate || '');
+      if (digits.length === 10 || digits.length === 11 || digits.length === 12 || digits.length === 13) return digits;
+    }
+    return '';
+  };
+
+  const handleSendPrintWhatsApp = async () => {
+    if (!order) return;
+    const number = resolveCustomerPhoneDigits(order);
+    if (!number) {
+      toast({ title: 'Telefone inválido', description: 'Cliente sem número de WhatsApp cadastrado.' });
+      return;
+    }
+
+    const el = carnetRef.current;
+    if (!el) {
+      toast({ title: 'Erro ao capturar', description: 'Não foi possível localizar o conteúdo do carnê.' });
+      return;
+    }
+
+    setIsSendingPrint(true);
+    const hadDefault = document.body.classList.contains('print-layout-default');
+    const hadA4 = document.body.classList.contains('print-layout-a4');
+
+    try {
+      document.body.classList.remove('print-layout-default', 'print-layout-a4');
+      document.body.classList.add('print-layout-a4');
+
+      await new Promise((resolve) => setTimeout(resolve, 150));
+
+      const imgs = Array.from(el.querySelectorAll('img'));
+      const hiddenImgs: Array<{ el: HTMLImageElement; display: string }> = [];
+      for (const img of imgs) {
+        const src = (img.getAttribute('src') || '').trim();
+        if (!src) continue;
+        try {
+          img.crossOrigin = 'anonymous';
+        } catch {}
+        if (/^https?:\/\//i.test(src) && !src.startsWith(window.location.origin)) {
+          hiddenImgs.push({ el: img, display: img.style.display });
+          img.style.display = 'none';
+        }
+      }
+
+      const canvas = await html2canvas(el, {
+        scale: 1.4,
+        useCORS: true,
+        backgroundColor: '#ffffff',
+        scrollX: -window.scrollX,
+        scrollY: -window.scrollY,
+      });
+
+      for (const item of hiddenImgs) {
+        item.el.style.display = item.display;
+      }
+
+      let finalCanvas = canvas;
+      const resizeToWidth = (maxWidth: number) => {
+        if (finalCanvas.width <= maxWidth) return;
+        const ratio = maxWidth / finalCanvas.width;
+        const resized = document.createElement('canvas');
+        resized.width = maxWidth;
+        resized.height = Math.max(1, Math.round(finalCanvas.height * ratio));
+        const ctx = resized.getContext('2d');
+        if (!ctx) throw new Error('Falha ao processar a imagem.');
+        ctx.drawImage(finalCanvas, 0, 0, resized.width, resized.height);
+        finalCanvas = resized;
+      };
+
+      resizeToWidth(1100);
+
+      const encodeJpeg = (quality: number) => finalCanvas.toDataURL('image/jpeg', quality);
+      let mediaDataUrl = encodeJpeg(0.62);
+      if (mediaDataUrl.length > 1_800_000) {
+        resizeToWidth(950);
+        mediaDataUrl = encodeJpeg(0.52);
+      }
+      if (mediaDataUrl.length > 1_800_000) {
+        resizeToWidth(850);
+        mediaDataUrl = encodeJpeg(0.45);
+      }
+
+      if (mediaDataUrl.length > 1_800_000) {
+        throw new Error('Print muito grande para enviar. Tente imprimir em A4 e tentar novamente.');
+      }
+      const firstName = String(order.customer?.name || '').trim().split(' ')[0] || 'Olá';
+      const message = `Olá, ${firstName}! Segue o print do seu carnê (pedido ${order.id}).\n\n*${settings.storeName}*`;
+
+      const res = await fetch('/api/whatsapp/send', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-admin-request': '1' },
+        body: JSON.stringify({
+          number,
+          message,
+          mediaDataUrl,
+          filename: `carne-${order.id}.jpg`,
+        }),
+      });
+
+      if (!res.ok) {
+        const data = await res.json().catch(() => null);
+        throw new Error(String(data?.error || 'Falha ao enviar no WhatsApp.'));
+      }
+
+      toast({ title: 'Enviado!', description: 'O print do carnê foi enviado no WhatsApp.' });
+    } catch (e) {
+      toast({ title: 'Erro ao enviar', description: e instanceof Error ? e.message : 'Erro inesperado.' });
+    } finally {
+      document.body.classList.remove('print-layout-default', 'print-layout-a4');
+      if (hadDefault) document.body.classList.add('print-layout-default');
+      if (hadA4) document.body.classList.add('print-layout-a4');
+      setIsSendingPrint(false);
+    }
+  };
+
 
   if (isLoading) {
     return <div className="p-8 text-center">Carregando carnê...</div>;
@@ -491,6 +614,10 @@ export default function CarnetPage() {
                 Cobrar Parcela
               </Button>
             )}
+            <Button variant="outline" onClick={handleSendPrintWhatsApp} disabled={isSendingPrint}>
+                <Send className="mr-2 h-4 w-4" />
+                Enviar Print
+            </Button>
             <Button variant="outline" onClick={() => handlePrint('default')}>
                 <Printer className="mr-2 h-4 w-4" />
                 Carnê Duas Vias
@@ -502,7 +629,7 @@ export default function CarnetPage() {
           </div>
         </header>
         
-        <main className="w-full bg-white text-black p-4 print:p-0 print:shadow-none print-default:grid print-default:grid-cols-2 print-default:gap-x-2 print-a4:flex print-a4:flex-col">
+        <main ref={carnetRef} className="w-full bg-white text-black p-4 print:p-0 print:shadow-none print-default:grid print-default:grid-cols-2 print-default:gap-x-2 print-a4:flex print-a4:flex-col">
             <div className="print-default:border-r print-default:border-dashed print-default:border-black print-default:pr-2">
                 <CarnetContent order={order} settings={settings} pixPayload={pixPayload} productCodeById={productCodeById} />
             </div>

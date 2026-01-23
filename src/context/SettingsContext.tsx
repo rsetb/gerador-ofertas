@@ -5,12 +5,13 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import { useToast } from '@/hooks/use-toast';
 import { getClientFirebase } from '@/lib/firebase-client';
-import { doc, setDoc, onSnapshot } from 'firebase/firestore';
+import { doc, getDoc, setDoc, onSnapshot } from 'firebase/firestore';
 import { useAudit } from './AuditContext';
 import { useAuth } from './AuthContext';
 import { errorEmitter } from '@/firebase/error-emitter';
 import { FirestorePermissionError } from '@/firebase/errors';
 import type { StoreSettings } from '@/lib/types';
+import { usePathname } from 'next/navigation';
 
 const initialSettings: StoreSettings = {
     storeName: 'ADC Móveis',
@@ -86,51 +87,93 @@ export const SettingsProvider = ({ children }: { children: ReactNode }) => {
     const { toast } = useToast();
     const { logAction } = useAudit();
     const { user } = useAuth();
+    const pathname = usePathname();
 
 
     useEffect(() => {
         const { db } = getClientFirebase();
         const settingsRef = doc(db, 'config', 'storeSettings');
-        const unsubscribe = onSnapshot(settingsRef, async (docSnap) => {
-            const cached = readCachedSettings();
+        const cached = readCachedSettings();
 
-            if (!docSnap.exists()) {
-                setSettings(cached || initialSettings);
-                setIsLoading(false);
-                return;
-            }
+        if (cached) {
+            setSettings(cached);
+            setIsLoading(false);
+        }
+        if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+            setSettings(cached || initialSettings);
+            setIsLoading(false);
+            return () => {};
+        }
 
-            const remote = mergeWithDefaults(docSnap.data() as Partial<StoreSettings>);
-            const remoteEmpty = isSettingsEffectivelyEmpty(remote);
-            const cachedUsable = cached && !isSettingsEffectivelyEmpty(cached);
+        const isQuotaExceeded = (error: unknown) => {
+            const message = error instanceof Error ? error.message : '';
+            const code = typeof error === 'object' && error !== null && 'code' in error ? String((error as any).code) : '';
+            return code === 'resource-exhausted' || /quota exceeded/i.test(message);
+        };
 
-            if (remoteEmpty && cachedUsable) {
-                setSettings(cached);
-                writeCachedSettings(cached);
-                if (user?.role === 'admin') {
-                    try {
-                        await setDoc(settingsRef, cached, { merge: true });
-                    } catch {}
+        if (user?.role === 'admin' && pathname.startsWith('/admin')) {
+            const unsubscribe = onSnapshot(settingsRef, async (docSnap) => {
+                const cachedFromSnapshot = readCachedSettings();
+
+                if (!docSnap.exists()) {
+                    setSettings(cachedFromSnapshot || initialSettings);
+                    setIsLoading(false);
+                    return;
                 }
+
+                const remote = mergeWithDefaults(docSnap.data() as Partial<StoreSettings>);
+                const remoteEmpty = isSettingsEffectivelyEmpty(remote);
+                const cachedUsable = cachedFromSnapshot && !isSettingsEffectivelyEmpty(cachedFromSnapshot);
+
+                if (remoteEmpty && cachedUsable) {
+                    setSettings(cachedFromSnapshot);
+                    writeCachedSettings(cachedFromSnapshot);
+                    try {
+                        await setDoc(settingsRef, cachedFromSnapshot, { merge: true });
+                    } catch {}
+                    setIsLoading(false);
+                    return;
+                }
+
+                setSettings(remote);
+                writeCachedSettings(remote);
                 setIsLoading(false);
-                return;
+            }, (error) => {
+                console.error("Failed to load settings from Firestore:", error);
+                if (!isQuotaExceeded(error)) {
+                    errorEmitter.emit('permission-error', new FirestorePermissionError({
+                        path: 'config/storeSettings',
+                        operation: 'get',
+                    }));
+                }
+                setSettings(readCachedSettings() || initialSettings);
+                setIsLoading(false);
+            });
+
+            return () => unsubscribe();
+        }
+
+        void (async () => {
+            try {
+                const snap = await getDoc(settingsRef);
+                if (!snap.exists()) {
+                    setSettings(readCachedSettings() || initialSettings);
+                    setIsLoading(false);
+                    return;
+                }
+                const remote = mergeWithDefaults(snap.data() as Partial<StoreSettings>);
+                setSettings(remote);
+                writeCachedSettings(remote);
+                setIsLoading(false);
+            } catch (error) {
+                console.error("Failed to load settings from Firestore:", error);
+                setSettings(readCachedSettings() || initialSettings);
+                setIsLoading(false);
             }
+        })();
 
-            setSettings(remote);
-            writeCachedSettings(remote);
-            setIsLoading(false);
-        }, (error) => {
-            console.error("Failed to load settings from Firestore:", error);
-            errorEmitter.emit('permission-error', new FirestorePermissionError({
-                path: 'config/storeSettings',
-                operation: 'get',
-            }));
-            setSettings(readCachedSettings() || initialSettings);
-            setIsLoading(false);
-        });
-
-        return () => unsubscribe();
-    }, [user?.role]);
+        return () => {};
+    }, [user?.role, pathname]);
 
     const updateSettings = async (newSettings: Partial<StoreSettings>) => {
         try {

@@ -15,6 +15,7 @@ import { ptBR } from 'date-fns/locale';
 import { useAuth } from './AuthContext';
 import { allocateNextCustomerCode, formatCustomerCode, reserveCustomerCodes } from '@/lib/customer-code';
 import { normalizeCpf } from '@/lib/customer-trash';
+import { usePathname } from 'next/navigation';
 
 // Helper function to log actions, passed as an argument now
 type LogAction = (action: string, details: string, user: User | null) => void;
@@ -142,6 +143,14 @@ interface AdminContextType {
   updateAvaria: (avariaId: string, avariaData: Partial<Omit<Avaria, 'id'>>, logAction: LogAction, user: User | null) => Promise<void>;
   deleteAvaria: (avariaId: string, logAction: LogAction, user: User | null) => Promise<void>;
   emptyTrash: (logAction: LogAction, user: User | null) => Promise<void>;
+  fetchBackupData: () => Promise<{
+    orders: Order[];
+    customers: CustomerInfo[];
+    customersTrash: CustomerInfo[];
+    commissionPayments: CommissionPayment[];
+    stockAudits: StockAudit[];
+    avarias: Avaria[];
+  }>;
   // Admin Data states
   orders: Order[];
   commissionPayments: CommissionPayment[];
@@ -162,6 +171,7 @@ export const AdminProvider = ({ children }: { children: ReactNode }) => {
   const { products, categories } = useData();
   const { toast } = useToast();
   const { user, users } = useAuth();
+  const pathname = usePathname();
   const notifiedOnlineOrderIdsRef = useRef<Set<string>>(new Set());
   const isOrdersSnapshotReadyRef = useRef(false);
 
@@ -182,8 +192,54 @@ export const AdminProvider = ({ children }: { children: ReactNode }) => {
   const [customers, setCustomers] = useState<CustomerInfo[]>([]);
   const [deletedCustomers, setDeletedCustomers] = useState<CustomerInfo[]>([]);
 
+  const isQuotaExceeded = (error: unknown) => {
+    const message = error instanceof Error ? error.message : '';
+    const code = typeof error === 'object' && error !== null && 'code' in error ? String((error as any).code) : '';
+    return code === 'resource-exhausted' || /quota exceeded/i.test(message);
+  };
+
+  const fetchBackupData = useCallback(async () => {
+    const { db } = getClientFirebase();
+
+    const ordersQuery = query(collection(db, 'orders'), orderBy('date', 'desc'));
+    const commissionQuery = query(collection(db, 'commissionPayments'), orderBy('paymentDate', 'desc'));
+    const stockAuditsQuery = query(collection(db, 'stockAudits'), orderBy('createdAt', 'desc'));
+    const avariasQuery = query(collection(db, 'avarias'), orderBy('createdAt', 'desc'));
+    const customersQuery = query(collection(db, 'customers'), orderBy('name', 'asc'));
+    const customersTrashQuery = query(collection(db, 'customersTrash'), orderBy('deletedAt', 'desc'));
+
+    try {
+      const [ordersSnap, commissionSnap, stockAuditsSnap, avariasSnap, customersSnap, customersTrashSnap] =
+        await Promise.all([
+          getDocs(ordersQuery),
+          getDocs(commissionQuery),
+          getDocs(stockAuditsQuery),
+          getDocs(avariasQuery),
+          getDocs(customersQuery),
+          canAccessCustomersTrash(user) ? getDocs(customersTrashQuery) : Promise.resolve(null),
+        ]);
+
+      return {
+        orders: ordersSnap.docs.map((d) => ({ ...d.data(), id: d.id } as Order)),
+        commissionPayments: commissionSnap.docs.map((d) => ({ ...d.data(), id: d.id } as CommissionPayment)),
+        stockAudits: stockAuditsSnap.docs.map((d) => ({ ...d.data(), id: d.id } as StockAudit)),
+        avarias: avariasSnap.docs.map((d) => ({ ...d.data(), id: d.id } as Avaria)),
+        customers: customersSnap.docs.map((d) => d.data() as CustomerInfo),
+        customersTrash: customersTrashSnap ? customersTrashSnap.docs.map((d) => d.data() as CustomerInfo) : [],
+      };
+    } catch (error) {
+      if (isQuotaExceeded(error)) {
+        throw error;
+      }
+      throw error;
+    }
+  }, [user]);
+
   // Effect for fetching admin-specific data
   useEffect(() => {
+    if (pathname.startsWith('/admin/configuracao')) {
+      return () => {};
+    }
     const { db } = getClientFirebase();
     const unsubscribes: (() => void)[] = [];
 
@@ -269,7 +325,7 @@ export const AdminProvider = ({ children }: { children: ReactNode }) => {
     setupListener('avarias', setAvarias);
     
     return () => unsubscribes.forEach(unsub => unsub());
-  }, [toast, user]);
+  }, [toast, user, pathname]);
 
   const addCustomer = useCallback(async (customerData: CustomerInfo, logAction: LogAction, user: User | null) => {
     const { db } = getClientFirebase();
@@ -312,6 +368,9 @@ export const AdminProvider = ({ children }: { children: ReactNode }) => {
   }, [toast]);
 
   useEffect(() => {
+    if (pathname.startsWith('/admin/configuracao')) {
+      return () => {};
+    }
     const { db } = getClientFirebase();
     const unsubscribes: Array<() => void> = [];
 
@@ -343,7 +402,7 @@ export const AdminProvider = ({ children }: { children: ReactNode }) => {
     }
 
     return () => unsubscribes.forEach((unsub) => unsub());
-  }, [user?.role]);
+  }, [user?.role, pathname]);
 
   const legacyCustomers = useMemo(() => {
     const customerMap = new Map<string, CustomerInfo>();
@@ -2134,6 +2193,7 @@ export const AdminProvider = ({ children }: { children: ReactNode }) => {
     restoreAdminData, resetOrders, resetProducts, resetFinancials, resetAllAdminData,
     saveStockAudit, addAvaria, updateAvaria, deleteAvaria,
     emptyTrash,
+    fetchBackupData,
     // Admin Data states
     orders,
     commissionPayments,
@@ -2154,6 +2214,7 @@ export const AdminProvider = ({ children }: { children: ReactNode }) => {
     restoreAdminData, resetOrders, resetProducts, resetFinancials, resetAllAdminData,
     saveStockAudit, addAvaria, updateAvaria, deleteAvaria,
     emptyTrash,
+    fetchBackupData,
     orders, commissionPayments, stockAudits, avarias, chatSessions, customersForUI, deletedCustomers, customerOrders, customerFinancials, financialSummary, commissionSummary
   ]);
 

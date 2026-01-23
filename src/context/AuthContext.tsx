@@ -2,11 +2,11 @@
 'use client';
 
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
-import { useRouter } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
 import { useToast } from '@/hooks/use-toast';
 import type { User, UserRole } from '@/lib/types';
 import { getClientFirebase } from '@/lib/firebase-client';
-import { collection, doc, getDocs, setDoc, updateDoc, writeBatch, query, where, getDoc, onSnapshot, deleteDoc } from 'firebase/firestore';
+import { collection, doc, getDocs, setDoc, updateDoc, writeBatch, query, where, getDoc, deleteDoc } from 'firebase/firestore';
 import { useAudit } from './AuditContext';
 import { FirestorePermissionError } from '@/firebase/errors';
 import { errorEmitter } from '@/firebase/error-emitter';
@@ -40,47 +40,60 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const [users, setUsers] = useState<User[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const router = useRouter();
+  const pathname = usePathname();
   const { toast } = useToast();
   const { logAction } = useAudit();
   
   useEffect(() => {
-    setIsLoading(true);
-    const { db } = getClientFirebase();
+    try {
+        const storedUser = localStorage.getItem('user');
+        if (storedUser) {
+            setUser(JSON.parse(storedUser));
+        }
+    } catch (error) {
+        console.error("Failed to read user from localStorage", error);
+        localStorage.removeItem('user');
+    } finally {
+        setIsLoading(false);
+    }
+  }, []);
 
-    const usersSeededRef = doc(db, 'config', 'usersSeeded');
-    let isUsersSeeded: boolean | null = null;
-    let isSeeding = false;
+  useEffect(() => {
+    const needsUsers = pathname === '/login' || pathname.startsWith('/admin');
+    if (!needsUsers) return;
 
-    const usersUnsubscribe = onSnapshot(collection(db, 'users'), async (snapshot) => {
-        if (isUsersSeeded === null) {
-          try {
-            const seededSnap = await getDoc(usersSeededRef);
-            isUsersSeeded = seededSnap.exists();
-          } catch {
-            isUsersSeeded = true;
-          }
+    const isQuotaExceeded = (error: unknown) => {
+      const message = error instanceof Error ? error.message : '';
+      const code = typeof error === 'object' && error !== null && 'code' in error ? String((error as any).code) : '';
+      return code === 'resource-exhausted' || /quota exceeded/i.test(message);
+    };
+
+    const loadUsers = async () => {
+      setIsLoading(true);
+      const { db } = getClientFirebase();
+
+      const usersSeededRef = doc(db, 'config', 'usersSeeded');
+      let isUsersSeeded: boolean | null = null;
+
+      try {
+        try {
+          const seededSnap = await getDoc(usersSeededRef);
+          isUsersSeeded = seededSnap.exists();
+        } catch {
+          isUsersSeeded = true;
         }
 
-        if (snapshot.empty) {
-          setUsers([]);
-          if (isUsersSeeded || isSeeding) return;
-
-          isSeeding = true;
-          try {
-            const batch = writeBatch(db);
-            initialUsers.forEach(u => {
-              batch.set(doc(db, 'users', u.id), u);
-            });
-            await batch.commit();
-            await setDoc(usersSeededRef, { seededAt: new Date().toISOString() }, { merge: true });
-            isUsersSeeded = true;
-          } finally {
-            isSeeding = false;
-          }
-          return;
+        const snapshot = await getDocs(collection(db, 'users'));
+        if (snapshot.empty && !isUsersSeeded) {
+          const batch = writeBatch(db);
+          initialUsers.forEach((u) => batch.set(doc(db, 'users', u.id), u));
+          await batch.commit();
+          await setDoc(usersSeededRef, { seededAt: new Date().toISOString() }, { merge: true });
+          isUsersSeeded = true;
         }
 
-        const mappedUsers = snapshot.docs.map(d => ({ ...d.data(), id: d.id } as User));
+        const refreshedSnapshot = snapshot.empty ? await getDocs(collection(db, 'users')) : snapshot;
+        const mappedUsers = refreshedSnapshot.docs.map((d) => ({ ...d.data(), id: d.id } as User));
         setUsers(mappedUsers);
 
         const initialPasswordById = new Map<string, string>();
@@ -96,36 +109,27 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
             )
           );
         }
+
         if (!isUsersSeeded) {
           try {
             await setDoc(usersSeededRef, { seededAt: new Date().toISOString() }, { merge: true });
-            isUsersSeeded = true;
-          } catch {
-          }
+          } catch {}
         }
-    },
-    (error) => {
-      console.error("Error fetching users:", error);
-      errorEmitter.emit('permission-error', new FirestorePermissionError({
-        path: 'users',
-        operation: 'list',
-      }));
-    });
-    
-    try {
-        const storedUser = localStorage.getItem('user');
-        if (storedUser) {
-            setUser(JSON.parse(storedUser));
+      } catch (error) {
+        console.error("Error fetching users:", error);
+        if (!isQuotaExceeded(error)) {
+          errorEmitter.emit('permission-error', new FirestorePermissionError({
+            path: 'users',
+            operation: 'list',
+          }));
         }
-    } catch (error) {
-        console.error("Failed to read user from localStorage", error);
-        localStorage.removeItem('user');
-    } finally {
+      } finally {
         setIsLoading(false);
-    }
-    
-    return () => usersUnsubscribe();
-  }, []);
+      }
+    };
+
+    void loadUsers();
+  }, [pathname]);
 
   const login = (username: string, pass: string) => {
     const foundUser = users.find(u => u.username.toLowerCase() === username.toLowerCase());
