@@ -1,0 +1,579 @@
+/* ========================================
+   CARTAZ DE OFERTA — Dual Yellow Brush Style
+   ======================================== */
+
+:root {
+    --bg-primary: #0a0a0f;
+    --bg-secondary: #12121a;
+    --bg-card: #1a1a2e;
+    --border: rgba(255, 255, 255, 0.06);
+    --text-primary: #f0f0f5;
+    --text-secondary: #8888a0;
+    --accent: #6c5ce7;
+    --accent-glow: rgba(108, 92, 231, 0.3);
+    --gradient-primary: linear-gradient(135deg, #6c5ce7, #a66efa);
+    --radius: 16px;
+    --radius-sm: 10px;
+}
+
+*,
+*::before,
+*::after {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+body {
+    font-family: 'Open Sans', 'Inter', sans-serif;
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    min-height: 100vh;
+}
+
+/* ========================================
+   HEADER
+   ======================================== */
+
+.header {
+    padding: 8px 20px;
+    border-bottom: 1px solid var(--border);
+    background: rgba(10, 10, 15, 0.85);
+    backdrop-filter: blur(16px);
+}
+
+.header-inner {
+    max-width: 1400px;
+    margin: 0 auto;
+    display: flex;
+    align-items: center;
+    gap: 16px;
+}
+
+.logo {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 20px;
+    font-weight: 800;
+}
+
+/* ========================================
+   LAYOUT
+   ======================================== */
+
+.main-container {
+    display: grid;
+    grid-template-columns: minmax(750px, 1fr) 1.2fr;
+    gap: 16px;
+    max-width: 1800px;
+    margin: 0 auto;
+    padding: 16px;
+}
+
+@media (max-width: 1280px) {
+    .main-container {
+        grid-template-columns: 1fr;
+    }
+}
+
+/* ========================================
+   EDITOR
+   ======================================== */
+
+.editor-panel {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 16px;
+    align-self: start;
+}
+
+.form-cols {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+    align-items: start;
+}
+
+.panel-title {
+    font-size: 18px;
+    font-weight: 800;
+    margin-bottom: 16px;
+}
+
+.section-title {
+    font-size: 12px;
+    color: var(--accent);
+    margin: 8px 0 4px;
+    padding-bottom: 4px;
+    border-bottom: 1px solid var(--border);
+}
+
+.form-group {
+    margin-bottom: 8px;
+}
+
+.form-group label {
+    display: block;
+    font-size: 9px;
+    font-weight: 700;
+    text-transform: uppercase;
+    color: var(--text-secondary);
+    margin-bottom: 2px;
+}
+
+.form-group input {
+    width: 100%;
+    padding: 8px 10px;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    color: var(--text-primary);
+    font-family: inherit;
+    font-size: 13px;
+}
+
+.form-row {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(60px, 1fr));
+    gap: 10px;
+}
+
+.pricing-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+}
+
+@media (max-width: 600px) {
+    .pricing-grid {
+        grid-template-columns: 1fr;
+    }
+}
+
+.pricing-col {
+    display: flex;
+    flex-direction: column;
+}
+
+.btn {
+    flex: 1;
+    padding: 10px;
+    border: none;
+    border-radius: var(--radius-sm);
+    font-weight: 800;
+    cursor: pointer;
+    transition: all 0.2s;
+    font-size: 13px;
+}
+
+.btn:active {
+    transform: scale(0.98);
+}
+
+.btn-primary {
+    background: var(--gradient-primary);
+    color: white;
+}
+
+.btn-print {
+    background: linear-gradient(135deg, #00b894, #00cec9);
+    color: white;
+}
+
+.compact-actions {
+    display: flex;
+    gap: 12px;
+    margin-top: 16px;
+    align-items: center;
+}
+
+/* ========================================
+   PREVIEW
+   ======================================== */
+
+.preview-panel {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 12px;
+    display: flex;
+    justify-content: center;
+    overflow: hidden;
+    align-self: start;
+}
+
+.preview-wrapper {
+    background: #222;
+    padding: 10px;
+    border-radius: var(--radius-sm);
+    overflow: hidden;
+}
+
+/* ========================================
+   CARTAZ DEFINITION (MM UNITS)
+   ======================================== */
+
+.cartaz {
+    width: 210mm;
+    height: 297mm;
+    background: white;
+    position: relative;
+    overflow: hidden;
+    color: black;
+    font-family: 'Lilita One', cursive;
+    /* The marker font */
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 0 5mm;
+    /* Reduced padding further */
+    justify-content: center;
+    /* Center vertically */
+    text-align: center;
+    flex-shrink: 0;
+}
+
+/* --- BRUSH STROKE MIXIN --- */
+.brush-bg {
+    /* No background here, just clip-path on img */
+    position: relative;
+    z-index: 0;
+}
+
+/* --- BANNER --- */
+.banner-container {
+    margin-bottom: 2mm;
+    position: relative;
+    padding: 4mm 5mm;
+    /* Reduced padding */
+}
+
+/* ... (banner-bg unchanged but ensuring match) ... */
+.banner-bg {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    transform: rotate(-1deg);
+    z-index: 1;
+    /* Positive z-index to stay above poster background */
+    clip-path: polygon(1% 15%, 8% 2%, 25% 10%, 45% 0%, 65% 8%, 85% 2%, 98% 10%, 100% 5%,
+            99% 85%, 92% 100%, 75% 92%, 55% 98%, 35% 88%, 15% 95%, 2% 85%, 0% 90%);
+}
+
+.banner-text {
+    font-size: 32mm;
+    color: #ff0000;
+    text-transform: uppercase;
+    line-height: 1;
+    letter-spacing: -1mm;
+    transform: rotate(-1deg);
+    position: relative;
+    z-index: 2;
+    /* Still above brush */
+}
+
+/* --- PRODUCT INFO --- */
+.product-line-1 {
+    font-size: 28mm;
+    line-height: 0.9;
+    color: black;
+    text-transform: uppercase;
+    transform: scaleY(1.1);
+    margin-bottom: 1mm;
+}
+
+.product-line-2 {
+    font-size: 24mm;
+    line-height: 0.9;
+    color: black;
+    text-transform: uppercase;
+    transform: scaleY(1.1);
+    margin-bottom: 1mm;
+}
+
+.product-detail {
+    font-family: 'Open Sans', sans-serif;
+    font-weight: 800;
+    font-size: 9mm;
+    color: black;
+    text-transform: uppercase;
+    margin-bottom: 3mm;
+}
+
+/* --- SEPARATOR --- */
+.separator-line {
+    width: 90%;
+    height: 0.5mm;
+    background: #ddd;
+    margin: 0 auto 3mm;
+}
+
+/* --- UNIT PRICE --- */
+.unit-section {
+    margin-bottom: 2mm;
+}
+
+.unit-label {
+    font-family: 'Open Sans', sans-serif;
+    font-weight: 800;
+    font-size: 7mm;
+    color: black;
+    text-transform: uppercase;
+    margin-bottom: 1mm;
+}
+
+.unit-price-container {
+    position: relative;
+    display: inline-block;
+    padding: 3mm 4mm;
+}
+
+.unit-price-bg {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    transform: rotate(1deg);
+    z-index: 1;
+    /* Positive z-index */
+    clip-path: polygon(0% 10%, 10% 0%, 30% 8%, 50% 2%, 70% 8%, 90% 0%, 100% 8%,
+            98% 90%, 88% 100%, 68% 92%, 48% 98%, 28% 90%, 8% 98%, 0% 90%);
+}
+
+.unit-price-text {
+    font-size: 36mm;
+    color: #ff0000;
+    line-height: 1;
+    letter-spacing: -2mm;
+    text-stroke: 1px black;
+    -webkit-text-stroke: 0px;
+    position: relative;
+    z-index: 2;
+    /* Above brush */
+}
+
+.unit-section .unit-price-container {
+    margin-bottom: 0;
+}
+
+/* --- PACK PRICE --- */
+.pack-section {
+    margin-top: 1mm;
+}
+
+.pack-label {
+    font-family: 'Open Sans', sans-serif;
+    font-weight: 800;
+    font-size: 9mm;
+    color: #0066ff;
+    text-transform: uppercase;
+    margin-bottom: 1mm;
+}
+
+.pack-price-container {
+    position: relative;
+    display: inline-block;
+    padding: 5mm 6mm;
+}
+
+.pack-price-bg {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    transform: rotate(-1deg);
+    z-index: 1;
+    /* Positive z-index */
+    clip-path: polygon(2% 8%, 12% 0%, 32% 10%, 52% 2%, 72% 10%, 92% 0%, 100% 8%,
+            99% 92%, 89% 100%, 69% 90%, 49% 98%, 29% 90%, 9% 98%, 1% 90%);
+}
+
+.pack-price-text {
+    font-size: 54mm;
+    color: #ff0000;
+    line-height: 0.9;
+    letter-spacing: -3mm;
+    position: relative;
+    z-index: 2;
+    /* Above brush */
+}
+
+/* Temp Label */
+.temp-label {
+    font-family: 'Open Sans', sans-serif;
+    font-weight: 800;
+    font-size: 10mm;
+    color: black;
+    text-transform: uppercase;
+    margin-top: -2mm;
+    margin-bottom: 1mm;
+    /* Reduced margin */
+}
+
+
+/* ========================================
+   DYNAMIC LAYOUT SCALING
+   ======================================== */
+
+/* --- ONLY UNIT SHOWN --- */
+.cartaz.only-unit .product-line-1 {
+    font-size: 38mm;
+    margin-bottom: 4mm;
+}
+
+.cartaz.only-unit .product-line-2 {
+    font-size: 32mm;
+    margin-bottom: 4mm;
+}
+
+.cartaz.only-unit .product-detail {
+    font-size: 14mm;
+    margin-bottom: 8mm;
+}
+
+.cartaz.only-unit .unit-section {
+    margin-top: 10mm;
+    transform: scale(1.3);
+}
+
+/* --- ONLY PACK SHOWN --- */
+.cartaz.only-pack .product-line-1 {
+    font-size: 38mm;
+    margin-bottom: 4mm;
+}
+
+.cartaz.only-pack .product-line-2 {
+    font-size: 32mm;
+    margin-bottom: 4mm;
+}
+
+.cartaz.only-pack .product-detail {
+    font-size: 14mm;
+    margin-bottom: 8mm;
+}
+
+.cartaz.only-pack .pack-section {
+    margin-top: 10mm;
+    transform: scale(1.3);
+}
+
+/* --- ONLY PRODUCT (NO PRICES) --- */
+.cartaz.only-product .banner-text {
+    font-size: 50mm;
+}
+
+.cartaz.only-product .product-line-1 {
+    font-size: 55mm;
+    margin-bottom: 8mm;
+}
+
+.cartaz.only-product .product-line-2 {
+    font-size: 45mm;
+    margin-bottom: 8mm;
+}
+
+.cartaz.only-product .product-detail {
+    font-size: 20mm;
+}
+
+
+/* ========================================
+   PRINT
+   ======================================== */
+
+@media print {
+    @page {
+        size: A4 portrait;
+        margin: 0;
+    }
+
+    body {
+        margin: 0;
+        padding: 0;
+        background: white;
+    }
+
+    .no-print,
+    .editor-panel,
+    .header {
+        display: none !important;
+    }
+
+    .main-container {
+        display: block;
+        padding: 0;
+        margin: 0;
+        max-width: none;
+    }
+
+    .preview-panel {
+        padding: 0;
+        margin: 0;
+        border: none;
+        background: transparent;
+    }
+
+    .preview-wrapper {
+        padding: 0;
+        background: transparent;
+    }
+
+    .cartaz {
+        width: 210mm;
+        height: 297mm;
+        margin: 0;
+        /* Force background graphics */
+        -webkit-print-color-adjust: exact;
+        print-color-adjust: exact;
+    }
+}
+
+/* Preview scaling */
+@media screen {
+    .cartaz {
+        /* JS now handles individual scaling for preview-stage, 
+           so we remove the hardcoded 0.4 transform here to avoid double-scaling */
+        transform-origin: top center;
+        box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+    }
+}
+
+/* --- TOAST --- */
+.toast {
+    position: fixed;
+    bottom: 24px;
+    left: 50%;
+    transform: translateX(-50%) translateY(100px);
+    background: var(--bg-card);
+    border: 1px solid var(--accent);
+    color: white;
+    padding: 12px 24px;
+    border-radius: 40px;
+    font-weight: 700;
+    z-index: 9999;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+    transition: transform 0.3s cubic-bezier(0.18, 0.89, 0.32, 1.28);
+    pointer-events: none;
+    /* Ensures it never blocks user input */
+    opacity: 0;
+}
+
+.toast.show {
+    transform: translateX(-50%) translateY(0);
+    opacity: 1;
+}
+
+/* --- HIDDEN CAPTURE TARGET --- */
+#hidden-capture-target {
+    position: absolute;
+    left: -9999px;
+    top: 0;
+    /* Use position absolute instead of fixed/none for html2canvas compatibility */
+    z-index: -100;
+}

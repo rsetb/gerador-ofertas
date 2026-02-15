@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Gerador de Cartaz de Oferta</title>
+    <!-- Importing "Carter One" and "Lilita One" for the marker look -->
+    <link
+        href="https://fonts.googleapis.com/css2?family=Carter+One&family=Lilita+One&family=Open+Sans:wght@700;800&display=swap"
+        rel="stylesheet">
+    <link rel="stylesheet" href="style.css">
+</head>
+
+<body>
+
+    <header class="header no-print">
+        <div class="header-inner">
+            <div class="logo">
+                <span class="logo-icon">�</span>
+                <span class="logo-text">OfertaGen</span>
+            </div>
+            <p class="header-subtitle" style="font-size: 11px; opacity: 0.7; margin-top: 2px;">Gerador de Cartaz Dual
+                (Unidade + Pack)</p>
+        </div>
+    </header>
+
+    <main class="main-container">
+        <!-- Editor -->
+        <section class="editor-panel no-print">
+            <h2 class="panel-title">✏️ Configurar Cartaz</h2>
+
+            <div class="form-cols">
+                <!-- COLUNA 1: PRODUTO 1 -->
+                <div class="form-col">
+                    <h3 class="section-title">🛒 Oferta 1</h3>
+                    <div class="form-group">
+                        <label>Topo</label>
+                        <input type="text" id="bannerText" value="OFERTA">
+                    </div>
+
+                    <div class="form-group">
+                        <label>Produto (Linha 1)</label>
+                        <input type="text" id="productLine1" value="CERVEJA">
+                    </div>
+                    <div class="form-group">
+                        <label>Marca (Linha 2)</label>
+                        <input type="text" id="productLine2" value="MARCA">
+                    </div>
+                    <div class="form-group">
+                        <label>Detalhe (Linha 3)</label>
+                        <input type="text" id="productDetail" value="LATA 350ML">
+                    </div>
+
+                    <div class="pricing-grid">
+                        <div class="pricing-col">
+                            <div class="form-group"
+                                style="margin-top: 8px; display: flex; align-items: center; gap: 8px;">
+                                <input type="checkbox" id="showUnit" checked>
+                                <label for="showUnit" style="display:inline; margin:0;">Exibir Preço Unitário</label>
+                            </div>
+
+                            <h3 class="section-title">✨ Preço Unitário</h3>
+                            <div class="form-group">
+                                <label>Rótulo</label>
+                                <input type="text" id="unitLabel" value="UNIDADE">
+                            </div>
+                            <div class="form-row">
+                                <div class="form-group"><label>Reais</label><input type="number" id="unitReais"
+                                        value="4"></div>
+                                <div class="form-group"><label>Centavos</label><input type="number" id="unitCentavos"
+                                        value="99"></div>
+                                <div class="form-group"><label>Temperatura</label><input type="text" id="unitTemp"
+                                        value="GELADA"></div>
+                            </div>
+                        </div>
+
+                        <div class="pricing-col">
+                            <div class="form-group"
+                                style="margin-top: 8px; display: flex; align-items: center; gap: 8px;">
+                                <input type="checkbox" id="showPack" checked>
+                                <label for="showPack" style="display:inline; margin:0;">Exibir Preço Pack</label>
+                            </div>
+
+                            <h3 class="section-title">📦 Preço Pack</h3>
+                            <div class="form-group">
+                                <label>Rótulo (Azul)</label>
+                                <input type="text" id="packLabel" value="PACK C/ 24 UN">
+                            </div>
+                            <div class="form-row">
+                                <div class="form-group"><label>Reais</label><input type="number" id="packReais"
+                                        value="143">
+                                </div>
+                                <div class="form-group"><label>Centavos</label><input type="number" id="packCentavos"
+                                        value="90"></div>
+                                <div class="form-group"><label>Temperatura</label><input type="text" id="packTemp"
+                                        value="NATURAL QUENTE"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- COLUNA 2: PRODUTO 2 -->
+                <div class="form-col">
+                    <div class="form-group"
+                        style="background: var(--bg-card); padding: 8px; border-radius: var(--radius-sm); border: 1px solid var(--accent); margin-bottom: 12px;">
+                        <div style="display: flex; align-items: center; gap: 8px;">
+                            <input type="checkbox" id="enableProduct2" onchange="toggleProduct2()">
+                            <label for="enableProduct2"
+                                style="display:inline; margin:0; font-size:12px; font-weight: 700; color: var(--accent);">
+                                ➕ 2º Oferta Diferente
+                            </label>
+                        </div>
+                    </div>
+
+                    <div id="product2-panel" style="display:none;">
+                        <h3 class="section-title">🛒 Oferta 2</h3>
+                        <div class="form-group">
+                            <label>Topo</label>
+                            <input type="text" id="bannerText_2" value="OFERTA">
+                        </div>
+
+                        <div class="form-group">
+                            <label>Produto (Linha 1)</label>
+                            <input type="text" id="productLine1_2" value="PRODUTO 2">
+                        </div>
+                        <div class="form-group">
+                            <label>Marca (Linha 2)</label>
+                            <input type="text" id="productLine2_2" value="MARCA 2">
+                        </div>
+                        <div class="form-group">
+                            <label>Detalhe (Linha 3)</label>
+                            <input type="text" id="productDetail_2" value="DETALHE 2">
+                        </div>
+
+                        <div class="pricing-grid">
+                            <div class="pricing-col">
+                                <h3 class="section-title">✨ Preço Unitário</h3>
+                                <div class="form-group">
+                                    <label>Rótulo</label>
+                                    <input type="text" id="unitLabel_2" value="UNIDADE">
+                                </div>
+                                <div class="form-row">
+                                    <div class="form-group"><label>Reais</label><input type="number" id="unitReais_2"
+                                            value="0">
+                                    </div>
+                                    <div class="form-group"><label>Centavos</label><input type="number"
+                                            id="unitCentavos_2" value="00"></div>
+                                    <div class="form-group"><label>Temperatura</label><input type="text" id="unitTemp_2"
+                                            value="GELADA"></div>
+                                </div>
+                            </div>
+
+                            <div class="pricing-col">
+                                <h3 class="section-title">📦 Preço Pack</h3>
+                                <div class="form-group">
+                                    <label>Rótulo (Azul)</label>
+                                    <input type="text" id="packLabel_2" value="PACK C/ 24 UN">
+                                </div>
+                                <div class="form-row">
+                                    <div class="form-group"><label>Reais</label><input type="number" id="packReais_2"
+                                            value="0">
+                                    </div>
+                                    <div class="form-group"><label>Centavos</label><input type="number"
+                                            id="packCentavos_2" value="00"></div>
+                                    <div class="form-group"><label>Temperatura</label><input type="text" id="packTemp_2"
+                                            value="NATURAL QUENTE"></div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="compact-actions">
+                <div style="flex: 2;">
+                    <label
+                        style="font-size: 10px; text-transform: uppercase; font-weight: 700; color: var(--text-secondary); margin-bottom: 4px; display: block;">Layout</label>
+                    <select id="printLayout"
+                        style="width: 100%; padding: 8px; border-radius: var(--radius-sm); border: 1px solid var(--border); background: var(--bg-card); color: var(--text-primary); font-size: 13px;">
+                        <option value="1up">1 Grande (V)</option>
+                        <option value="2up">2 Pequenos (H)</option>
+                        <option value="2up-stacked">2 Pequenos (V)</option>
+                    </select>
+                </div>
+                <button class="btn btn-print" onclick="printA4()" style="margin-top: 10px;">🖨️ Imprimir</button>
+                <button class="btn" onclick="clearForm()"
+                    style="margin-top: 10px; max-width: 60px; background: transparent; border: 1px solid var(--border); color: var(--text-secondary);">🗑️</button>
+            </div>
+        </section>
+
+        <!-- Preview -->
+        <div class="preview-panel">
+            <div class="preview-wrapper">
+                <div id="preview-stage"
+                    style="display: flex; gap: 20px; transition: transform 0.3s ease; justify-content: center; align-items: start; width: max-content; transform-origin: top left;">
+                    <div id="cartaz" class="cartaz">
+                        <!-- Content injected by JS -->
+                    </div>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <div id="toast" class="toast no-print"><span id="toastMsg"></span></div>
+
+    <!-- Dedicated off-screen target for high-res printing -->
+    <div id="hidden-capture-target" class="cartaz no-print"></div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+    <script src="script.js"></script>
+</body>
+
+</html>
