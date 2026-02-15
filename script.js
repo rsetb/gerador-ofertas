@@ -146,7 +146,6 @@ function updatePreview() {
             const dataP2 = useP2 ? d2 : d1;
             cartaz1.innerHTML = `
                 <div class="product-half">${buildCartazHTML(d1)}</div>
-                <div class="split-divider"></div>
                 <div class="product-half">${buildCartazHTML(dataP2)}</div>
             `;
         } else {
@@ -298,7 +297,6 @@ async function printA4() {
             const d2Local = useP2 ? d2 : d1;
             hiddenTarget.innerHTML = `
                 <div class="product-half">${buildCartazHTML(d1)}</div>
-                <div class="split-divider"></div>
                 <div class="product-half">${buildCartazHTML(d2Local)}</div>
             `;
         } else {
