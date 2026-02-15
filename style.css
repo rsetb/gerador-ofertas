@@ -482,6 +482,77 @@ body {
     font-size: 20mm;
 }
 
+/* --- SPLIT LAYOUT (2 per Page) --- */
+.cartaz.split-layout {
+    padding: 0;
+    justify-content: flex-start;
+}
+
+.product-half {
+    width: 100%;
+    height: 148.5mm;
+    /* Exactly half of 297mm */
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 0 5mm;
+    overflow: hidden;
+}
+
+.split-divider {
+    width: 100%;
+    height: 0;
+    border-top: 1px dashed #ccc;
+    position: absolute;
+    top: 50%;
+    left: 0;
+    z-index: 10;
+}
+
+/* Scale adjustments for half-page internal posters */
+.split-layout .banner-text {
+    font-size: 20mm;
+}
+
+.split-layout .product-line-1 {
+    font-size: 18mm;
+}
+
+.split-layout .product-line-2 {
+    font-size: 14mm;
+}
+
+.split-layout .product-detail {
+    font-size: 6mm;
+}
+
+.split-layout .unit-price-text {
+    font-size: 26mm;
+}
+
+.split-layout .pack-price-text {
+    font-size: 38mm;
+}
+
+.split-layout .temp-label {
+    font-size: 6mm;
+}
+
+.split-layout .unit-label,
+.split-layout .pack-label {
+    font-size: 5mm;
+}
+
+.split-layout .banner-container {
+    padding: 2mm 3mm;
+}
+
+.split-layout .separator-line {
+    margin: 0 auto 2mm;
+}
+
 
 /* ========================================
    PRINT

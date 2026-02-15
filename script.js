@@ -141,14 +141,27 @@ function updatePreview() {
     // Poster 1
     const cartaz1 = document.getElementById('cartaz');
     if (cartaz1) {
-        applyLayoutClasses(cartaz1, d1);
-        cartaz1.innerHTML = buildCartazHTML(d1);
-        cartaz1.style.transform = 'scale(1)'; // Always 1 inside scaled stage
+        if (layout === '2up-split') {
+            cartaz1.className = 'cartaz split-layout';
+            const dataP2 = useP2 ? d2 : d1;
+            cartaz1.innerHTML = `
+                <div class="product-half">${buildCartazHTML(d1)}</div>
+                <div class="split-divider"></div>
+                <div class="product-half">${buildCartazHTML(dataP2)}</div>
+            `;
+        } else {
+            applyLayoutClasses(cartaz1, d1);
+            cartaz1.innerHTML = buildCartazHTML(d1);
+        }
+        cartaz1.style.transform = 'scale(1)';
     }
 
-    // Poster 2
+    // Poster 2 (Only for non-integrated side-by-side modes)
     let cartaz2 = document.getElementById('cartaz2');
-    if (showP2) {
+    const isIntegrated = (layout === '2up-split');
+    const showSecondary = (layout !== '1up' && !isIntegrated) || (layout === '1up' && useP2 && !isIntegrated);
+
+    if (showSecondary) {
         if (!cartaz2) {
             cartaz2 = document.createElement('div');
             cartaz2.id = 'cartaz2';
@@ -165,7 +178,8 @@ function updatePreview() {
     }
 
     // Positioning and Scaling
-    stage.style.flexDirection = (layout === '2up-stacked') ? 'column' : 'row';
+    const useColumn = (layout === '2up-stacked');
+    stage.style.flexDirection = useColumn ? 'column' : 'row';
     const GAP = 0;
     stage.style.gap = GAP + 'px';
 
@@ -178,23 +192,28 @@ function updatePreview() {
     if (wrapper) {
         const A4_W = 210 * 3.78; // ~794px
         const A4_H = 297 * 3.78; // ~1123px
-        const GAP = 0; // Removing gap for 'divide folha' layouts
+        const GAP_VAL = 0;
         const PADDING = 20; // 10px each side
 
         let contentW = A4_W;
         let contentH = A4_H;
 
-        // If showP2 is true, it means we have two posters visible
-        if (showP2) {
+        // Determination of content size
+        const twoSeparateVisible = showSecondary;
+
+        if (twoSeparateVisible) {
             if (layout === '2up-stacked') {
-                contentH = (A4_H * 2) + GAP;
+                contentH = (A4_H * 2) + GAP_VAL;
             } else {
-                // For both '2up' and '1up' with useP2 enabled, they are side-by-side
-                contentW = (A4_W * 2) + GAP;
+                contentW = (A4_W * 2) + GAP_VAL;
             }
+        } else if (isIntegrated) {
+            // Already A4
+            contentW = A4_W;
+            contentH = A4_H;
         }
 
-        // Set stage size explicitly to avoid layout issues before scaling
+        // Set stage size explicitly
         stage.style.width = contentW + 'px';
         stage.style.height = contentH + 'px';
 
@@ -273,11 +292,21 @@ async function printA4() {
 
     const hiddenTarget = document.getElementById('hidden-capture-target');
 
-    const capture = async (data) => {
-        applyLayoutClasses(hiddenTarget, data);
-        hiddenTarget.innerHTML = buildCartazHTML(data);
+    const capture = async (data, isDual = false) => {
+        if (isDual) {
+            hiddenTarget.className = 'cartaz split-layout';
+            const d2Local = useP2 ? d2 : d1;
+            hiddenTarget.innerHTML = `
+                <div class="product-half">${buildCartazHTML(d1)}</div>
+                <div class="split-divider"></div>
+                <div class="product-half">${buildCartazHTML(d2Local)}</div>
+            `;
+        } else {
+            applyLayoutClasses(hiddenTarget, data);
+            hiddenTarget.innerHTML = buildCartazHTML(data);
+        }
+
         await document.fonts.ready;
-        // Small delay to ensure render is stable
         await new Promise(r => setTimeout(r, 100));
 
         const canvas = await html2canvas(hiddenTarget, {
@@ -291,6 +320,20 @@ async function printA4() {
     };
 
     try {
+        if (layout === '2up-split') {
+            const imgCombined = await capture(d1, true);
+            const printWindow = window.open('', '_blank');
+            if (printWindow) {
+                const style = '@page { size: A4 portrait; margin: 0; } body { margin: 0; padding: 0; } img { width: 100%; height: 100%; object-fit: contain; }';
+                printWindow.document.write(`<html><head><style>${style}</style></head><body>
+                    <img src="${imgCombined}">
+                    <script>window.onload=()=>{ setTimeout(()=>{window.print(); window.close();}, 500); };</script>
+                </body></html>`);
+                printWindow.document.close();
+            }
+            return;
+        }
+
         const img1 = await capture(d1);
         const img2 = useP2 ? await capture(d2) : img1;
 
