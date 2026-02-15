@@ -501,15 +501,6 @@ body {
     overflow: hidden;
 }
 
-.split-divider {
-    width: 100%;
-    height: 0;
-    border-top: 1px dashed #ccc;
-    position: absolute;
-    top: 50%;
-    left: 0;
-    z-index: 10;
-}
 
 /* Scale adjustments for half-page internal posters */
 .split-layout .banner-text {
