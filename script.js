@@ -166,7 +166,8 @@ function updatePreview() {
 
     // Positioning and Scaling
     stage.style.flexDirection = (layout === '2up-stacked') ? 'column' : 'row';
-    stage.style.gap = '20px';
+    const GAP = 0;
+    stage.style.gap = GAP + 'px';
 
     // Auto-scale to fit preview area
     const scale = (layout === '1up' && !useP2) ? 0.4 : 0.25;
@@ -177,7 +178,7 @@ function updatePreview() {
     if (wrapper) {
         const A4_W = 210 * 3.78; // ~794px
         const A4_H = 297 * 3.78; // ~1123px
-        const GAP = 20;
+        const GAP = 0; // Removing gap for 'divide folha' layouts
         const PADDING = 20; // 10px each side
 
         let contentW = A4_W;
@@ -299,10 +300,13 @@ async function printA4() {
         } else {
             let style = '';
             if (layout === '2up') {
-                style = '@page { size: A4 landscape; margin: 0; } html, body { margin: 0; padding: 0; display: flex; align-items: center; justify-content: center; height: 100%; gap: 5mm; } img { width: 47%; object-fit: contain; }';
+                // Side-by-side on Landscape A4
+                style = '@page { size: A4 landscape; margin: 0; } html, body { margin: 0; padding: 0; display: flex; align-items: center; justify-content: center; height: 100vh; gap: 0; } img { width: 50%; height: 100%; object-fit: contain; }';
             } else if (layout === '2up-stacked') {
-                style = '@page { size: A4 portrait; margin: 0; } html, body { margin: 0; padding: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; gap: 5mm; } img { height: 47%; object-fit: contain; }';
+                // Top/Bottom on Portrait A4
+                style = '@page { size: A4 portrait; margin: 0; } html, body { margin: 0; padding: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; gap: 0; } img { height: 50%; width: 100%; object-fit: contain; }';
             } else {
+                // Full A4
                 style = '@page { size: A4 portrait; margin: 0; } body { margin: 0; padding: 0; } img { width: 100%; height: 100%; object-fit: contain; }';
             }
 
